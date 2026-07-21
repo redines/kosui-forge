@@ -1,0 +1,7 @@
+{
+  "is_owner": false,
+  "is_admin": false,
+  "can_write": true,
+  "can_read": true,
+  "can_create_repository": true
+}
