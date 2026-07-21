@@ -10,7 +10,7 @@ The tool is independently packaged under `tools/repo-bootstrap`; run its develop
 - Every mutating command displays a complete plan and prompts before the first side effect. `--yes` is the only non-interactive bypass.
 - Public creation requires `--public` plus interactive confirmation. Non-interactive public creation additionally requires `--yes --ack-public NAME`.
 - `--dry-run` and `doctor` perform reads only. Dry-run still authenticates and inspects local paths, repositories, visibility, ownership, mirrors, and deploy keys so its result is useful.
-- Forgejo must use HTTPS. The built-in HTTP transport refuses redirects, preventing an `Authorization` header from being forwarded to another origin.
+- Forgejo must use HTTPS. The pyforgejo SDK transport uses a bounded timeout and refuses redirects, preventing an `Authorization` header from being forwarded to another origin.
 - Tokens, passwords, private keys, authenticated URLs, and headers are not accepted in config or command arguments. Diagnostics and stage journals redact common secret forms.
 - Existing resources are reused only when owner, name, privacy, description, admin permission, origin, branch, mirror policy, and deploy key match. Missing or ambiguous metadata fails closed.
 - Mirror authentication uses Forgejo's unique per-repository SSH key. The matching GitHub deploy key is writable and repository-scoped.
@@ -20,6 +20,7 @@ The tool is independently packaged under `tools/repo-bootstrap`; run its develop
 ## Requirements
 
 - Python 3.11 or newer on Linux, macOS, or Windows.
+- Python dependencies `githubkit[all-schemas]>=0.16.0` and `pyforgejo>=2.0.7,<3`; package installation resolves them automatically.
 - Parseable `git`, `gh`, and OpenSSH client versions on `PATH`.
 - An SSH host alias for Forgejo, resolvable with `ssh -G ALIAS`.
 - Forgejo 11 or newer with push-mirror API support.
@@ -43,6 +44,8 @@ repo-bootstrap --version
 ```
 
 PowerShell activation uses `.venv\Scripts\Activate.ps1`.
+
+GitHub and Forgejo API operations use GitHubKit and pyforgejo respectively. The `gh` CLI remains a required local authentication gate and supplies the GitHub token to GitHubKit in memory; production code does not use `gh api` as its API client. See [`../../research/sdk-client-selection.md`](../../research/sdk-client-selection.md) for the reviewed dependency and adapter boundary.
 
 ## Global non-secret configuration
 
@@ -88,7 +91,7 @@ Doctor reports individual `PASS`/`FAIL` results for:
 
 - supported OS and Python runtime;
 - `git`, `gh`, and `ssh` presence and parseable versions;
-- `gh auth status --hostname HOST` and a non-destructive GitHub `/user` API request;
+- `gh auth status --hostname HOST` and a non-destructive GitHubKit authenticated-user request using the in-memory `gh` token;
 - HTTPS Forgejo reachability, version, authenticated identity, target owner, repository-create permission, mirror-admin permission, and mirror API support;
 - GitHub owner existence plus create/admin permission;
 - SSH alias resolution;
@@ -131,15 +134,15 @@ repo-bootstrap create sample \
 
 The idempotent sequence is:
 
-1. detect or create the private GitHub repository through authenticated `gh api`;
+1. detect or create the private GitHub repository through the authenticated GitHubKit SDK;
 2. detect or create the Forgejo push mirror with `use_ssh=true`, `sync_on_commit=true`, and the configured fallback interval;
 3. retrieve Forgejo's generated public key;
 4. detect or register that key as `read_only=false`, titled `Forgejo mirror: OWNER/NAME`;
 5. disable GitHub Actions;
-6. trigger `POST /repos/{owner}/{repo}/push_mirrors-sync`;
+6. trigger mirror synchronization through pyforgejo's generated push-mirror endpoint;
 7. poll and require the mirror response to contain `last_error` with the exact empty value.
 
-GitHub repository creation and all GitHub API operations include the configured `--hostname` and pass JSON through standard input. No credential is placed in process arguments.
+GitHubKit uses the configured host (`https://HOST/api/v3` for GitHub Enterprise Server). The tool obtains a token with `gh auth token --hostname HOST`, passes it directly to the SDK in memory, and never places the credential in process arguments or copies credential-helper diagnostics into errors.
 
 ## Explicit public opt-in
 
@@ -246,7 +249,7 @@ ruff format --check src tests
 mypy src
 ```
 
-The local suite covers private defaults, interactive/non-interactive public gates, no-write preflight, missing/stale tools and auth, unreachable services, owner/admin permission failures, HTTPS/redirect handling, API payloads, path behavior on Linux/macOS/Windows, repository and key collisions, mirror verification, dry-run behavior, filter correctness, stage journals, partial failures, idempotency, and redaction.
+The local suite covers private defaults, interactive/non-interactive public gates, no-write preflight, missing/stale tools and auth, unreachable services, owner/admin permission failures, HTTPS/redirect handling, SDK boundaries and API payloads, Forgejo 11.0.16 response contracts, path behavior on Linux/macOS/Windows, repository and key collisions, mirror verification, dry-run behavior, filter correctness, stage journals, partial failures, idempotency, and redaction.
 
 ## Local private E2E checklist
 
@@ -282,7 +285,8 @@ Then verify:
 git -C "$REPO_BOOTSTRAP_E2E_PROJECTS_ROOT/$REPO_BOOTSTRAP_E2E_REPO" remote get-url origin
 git -C "$REPO_BOOTSTRAP_E2E_PROJECTS_ROOT/$REPO_BOOTSTRAP_E2E_REPO" branch --show-current
 
-# GitHub is private and Actions are disabled
+# Independent local-PC verification: GitHub is private and Actions are disabled.
+# These gh api reads validate the result; repo-bootstrap's production client uses GitHubKit.
 gh api --hostname "$REPO_BOOTSTRAP_E2E_GITHUB_HOST" \
   "/repos/$REPO_BOOTSTRAP_E2E_GITHUB_OWNER/$REPO_BOOTSTRAP_E2E_REPO" \
   --jq '.private'
