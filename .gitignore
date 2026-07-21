@@ -1,6 +1,19 @@
+# Isolated workspaces and local environments
+.worktrees/
 .venv/
+.venv-*/
+venv/
+
+# Python caches and test/type/lint output
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging output and generated metadata
 *.egg-info/
 build/
 dist/
