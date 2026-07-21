@@ -34,13 +34,21 @@ class CheckResult:
     guidance: str = ""
 
 
+CheckReporter = Callable[[CheckResult], None]
+
+
 @dataclass(frozen=True)
 class PreflightReport:
     checks: tuple[CheckResult, ...]
+    cancelled: bool = False
 
     @property
     def ok(self) -> bool:
-        return bool(self.checks) and all(check.ok for check in self.checks)
+        return (
+            not self.cancelled
+            and bool(self.checks)
+            and all(check.ok for check in self.checks)
+        )
 
     def render(self) -> str:
         lines: list[str] = []
@@ -51,6 +59,30 @@ class PreflightReport:
                 line += f"; {redact(check.guidance)}"
             lines.append(line)
         return "\n".join(lines)
+
+
+class _PreflightCancelled(Exception):
+    def __init__(self, checks: tuple[CheckResult, ...]) -> None:
+        super().__init__("preflight cancellation requested")
+        self.checks = checks
+
+
+class _CheckCollector(list[CheckResult]):
+    def __init__(
+        self,
+        reporter: CheckReporter | None,
+        cancellation_requested: Callable[[], bool] | None,
+    ) -> None:
+        super().__init__()
+        self._reporter = reporter
+        self._cancellation_requested = cancellation_requested
+
+    def append(self, check: CheckResult) -> None:
+        super().append(check)
+        if self._reporter is not None:
+            self._reporter(check)
+        if self._cancellation_requested is not None and self._cancellation_requested():
+            raise _PreflightCancelled(tuple(self))
 
 
 def _subprocess_runner(args: Sequence[str]) -> ToolResult:
@@ -161,7 +193,7 @@ def _github_owner_access(
     }
 
 
-def run_preflight(
+def _run_preflight(
     config: Config,
     forgejo: Any,
     github: Any,
@@ -174,10 +206,12 @@ def run_preflight(
     command_runner: CommandRunner | None = None,
     which: Callable[[str], str | None] = shutil.which,
     platform_name: str = sys.platform,
+    reporter: CheckReporter | None = None,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> PreflightReport:
     """Run a comprehensive read-only prerequisite and collision inspection."""
     run = command_runner or _subprocess_runner
-    checks: list[CheckResult] = []
+    checks = _CheckCollector(reporter, cancellation_requested)
 
     family = _platform_family(platform_name)
     platform_ok = family in {"linux", "macos", "windows"}
@@ -709,3 +743,42 @@ def run_preflight(
             )
 
     return PreflightReport(tuple(checks))
+
+
+def run_preflight(
+    config: Config,
+    forgejo: Any,
+    github: Any,
+    *,
+    token_present: bool,
+    name: str | None,
+    description: str | None,
+    private: bool,
+    with_github: bool,
+    command_runner: CommandRunner | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    platform_name: str = sys.platform,
+    reporter: CheckReporter | None = None,
+    cancellation_requested: Callable[[], bool] | None = None,
+) -> PreflightReport:
+    """Run read-only checks with optional progress and cooperative cancellation."""
+    if cancellation_requested is not None and cancellation_requested():
+        return PreflightReport((), cancelled=True)
+    try:
+        return _run_preflight(
+            config,
+            forgejo,
+            github,
+            token_present=token_present,
+            name=name,
+            description=description,
+            private=private,
+            with_github=with_github,
+            command_runner=command_runner,
+            which=which,
+            platform_name=platform_name,
+            reporter=reporter,
+            cancellation_requested=cancellation_requested,
+        )
+    except _PreflightCancelled as exc:
+        return PreflightReport(exc.checks, cancelled=True)

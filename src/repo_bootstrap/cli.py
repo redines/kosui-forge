@@ -7,6 +7,14 @@ import os
 from pathlib import Path
 import sys
 
+from kosui_forge.application.contracts import (
+    DoctorRequest,
+    OperationResult,
+    OperationStatus,
+)
+from kosui_forge.infrastructure.doctor import build_doctor_service
+
+from . import __version__
 from .config import Config, load_config, write_config
 from .errors import PartialFailure, RepoToolingError, SafetyError
 from .forgejo import ForgejoClient
@@ -33,7 +41,9 @@ def _add_batch_arguments(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="repo-bootstrap")
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     parser.add_argument("--config", type=Path, default=default_config_path())
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -207,6 +217,17 @@ def _record_journal_failure(
         )
 
 
+def _render_doctor_result(result: OperationResult) -> str:
+    lines: list[str] = []
+    for check in result.checks:
+        status = "PASS" if check.ok else "FAIL"
+        line = f"[{status}] {check.name}: {check.detail}"
+        if not check.ok and check.guidance:
+            line += f"; {check.guidance}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -232,18 +253,29 @@ def main(
         github = GitHubClient(host=config.github_host)
 
         if args.command == "doctor":
-            report = run_preflight(
-                config,
-                forgejo,
-                github,
-                token_present=token_present,
-                name=args.name,
-                description=args.description if args.name else None,
-                private=True,
-                with_github=not args.no_github,
+            service = build_doctor_service(
+                environment=environment,
+                config_loader=lambda _path: config,
+                forgejo_factory=lambda _url, _token: forgejo,
+                github_factory=lambda **_kwargs: github,
+                preflight_runner=run_preflight,
             )
-            print(report.render())
-            return 0 if report.ok else 2
+            doctor_result = service.run(
+                DoctorRequest(
+                    config_path=args.config,
+                    repository_name=args.name,
+                    description=args.description if args.name else None,
+                    include_github=not args.no_github,
+                )
+            )
+            if doctor_result.error is not None:
+                print(
+                    f"error: {redact(doctor_result.error.message, (token or '',))}",
+                    file=sys.stderr,
+                )
+                return 2
+            print(_render_doctor_result(doctor_result))
+            return 0 if doctor_result.status is OperationStatus.SUCCEEDED else 2
 
         if args.command == "create":
             private = visibility == "private"

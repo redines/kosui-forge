@@ -1,3 +1,3 @@
-"""Private-by-default Forgejo and GitHub repository automation."""
+"""Compatibility package for Kosui Forge repository automation."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

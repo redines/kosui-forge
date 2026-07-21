@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "repo-bootstrap"
-version = "0.1.0"
-description = "Private-by-default Forgejo repository creation and GitHub push-mirror automation"
+name = "kosui-forge"
+version = "0.2.0"
+description = "Cross-platform Forgejo and GitHub repository manager with a private-by-default automation core"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,7 +13,7 @@ dependencies = [
   "pyforgejo>=2.0.7,<3",
 ]
 license = "MIT"
-authors = [{name = "kosuiroom"}]
+authors = [{name = "Kosui Forge contributors"}]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
