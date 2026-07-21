@@ -9,10 +9,10 @@ import sys
 
 from kosui_forge.application.contracts import (
     DoctorRequest,
-    OperationResult,
     OperationStatus,
 )
-from kosui_forge.infrastructure.doctor import build_doctor_service
+from kosui_forge.infrastructure.cli import build_doctor_service
+from kosui_forge.presentation.cli.doctor import render_doctor_result
 
 from . import __version__
 from .config import Config, load_config, write_config
@@ -217,17 +217,6 @@ def _record_journal_failure(
         )
 
 
-def _render_doctor_result(result: OperationResult) -> str:
-    lines: list[str] = []
-    for check in result.checks:
-        status = "PASS" if check.ok else "FAIL"
-        line = f"[{status}] {check.name}: {check.detail}"
-        if not check.ok and check.guidance:
-            line += f"; {check.guidance}"
-        lines.append(line)
-    return "\n".join(lines)
-
-
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -274,7 +263,7 @@ def main(
                     file=sys.stderr,
                 )
                 return 2
-            print(_render_doctor_result(doctor_result))
+            print(render_doctor_result(doctor_result))
             return 0 if doctor_result.status is OperationStatus.SUCCEEDED else 2
 
         if args.command == "create":
