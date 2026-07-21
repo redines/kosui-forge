@@ -1,0 +1,11 @@
+{
+  "repo_name": "sample",
+  "remote_name": "remote_mirror_forgejo11",
+  "remote_address": "git@github.com:gh-owner/sample.git",
+  "created": "2026-07-20T10:02:00Z",
+  "last_update": "2026-07-20T10:03:00Z",
+  "last_error": "",
+  "interval": "8h0m0s",
+  "sync_on_commit": true,
+  "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIForgejo11ContractKey repo-bootstrap"
+}

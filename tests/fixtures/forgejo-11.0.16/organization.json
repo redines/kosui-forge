@@ -1,0 +1,13 @@
+{
+  "id": 11,
+  "username": "acme",
+  "name": "acme",
+  "full_name": "Acme Engineering",
+  "email": "",
+  "avatar_url": "https://forgejo.example.test/avatars/11",
+  "description": "Engineering organization",
+  "website": "",
+  "location": "",
+  "visibility": "private",
+  "repo_admin_change_team_access": false
+}
