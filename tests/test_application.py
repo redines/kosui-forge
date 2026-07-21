@@ -9,6 +9,7 @@ from kosui_forge.application.contracts import (
     DoctorCheck,
     DoctorRequest,
     EventState,
+    OperationError,
     OperationResult,
     OperationStatus,
     ResourceLink,
@@ -55,6 +56,11 @@ class FakeDoctorPort:
                 RawResourceLink("Projects root", f"/srv/{self.sentinel}"),
             ),
         )
+
+
+class FailingDoctorPort(FakeDoctorPort):
+    def run(self, **_kwargs):
+        raise OSError(f"preflight failed for {self.sentinel}")
 
 
 class ApplicationContractTests(unittest.TestCase):
@@ -135,6 +141,22 @@ class DoctorServiceTests(unittest.TestCase):
         }
 
         self.assertEqual(concrete_modules, set())
+
+    def test_exception_returns_a_typed_redacted_error(self):
+        events = []
+
+        result = DoctorService(FailingDoctorPort(())).run(
+            DoctorRequest(config_path=Path("/tmp/config.toml")),
+            progress=events.append,
+        )
+
+        self.assertEqual(result.status, OperationStatus.FAILED)
+        self.assertEqual(
+            result.error,
+            OperationError("preflight failed for <redacted>"),
+        )
+        self.assertEqual(events[-1].message, "preflight failed for <redacted>")
+        self.assertNotIn("test-redaction-sentinel-value", repr((events, result)))
 
     def test_cancellation_is_honored_after_a_read_only_check(self):
         token = CancellationToken()

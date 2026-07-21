@@ -104,6 +104,13 @@ class RecoveryInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class OperationError:
+    """Redacted terminal diagnostic for an operation that could not complete."""
+
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
 class OperationEvent:
     """One immutable, ordered progress event."""
 
@@ -126,4 +133,5 @@ class OperationResult:
     checks: tuple[DoctorCheck, ...] = ()
     links: tuple[ResourceLink, ...] = ()
     recovery: RecoveryInfo | None = None
+    error: OperationError | None = None
     cancellation_state: CancellationState = CancellationState.NOT_REQUESTED

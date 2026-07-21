@@ -268,6 +268,12 @@ def main(
                     include_github=not args.no_github,
                 )
             )
+            if doctor_result.error is not None:
+                print(
+                    f"error: {redact(doctor_result.error.message, (token or '',))}",
+                    file=sys.stderr,
+                )
+                return 2
             print(_render_doctor_result(doctor_result))
             return 0 if doctor_result.status is OperationStatus.SUCCEEDED else 2
 

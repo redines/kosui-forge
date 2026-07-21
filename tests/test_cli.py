@@ -234,6 +234,42 @@ class MainExitCodeTests(unittest.TestCase):
         self.assertIsInstance(request, DoctorRequest)
         self.assertEqual(request.repository_name, "sample")
 
+    def test_doctor_preflight_exception_preserves_compatibility_diagnostic(self):
+        config = Config(
+            forgejo_url="https://forgejo.example.test",
+            forgejo_owner="owner",
+            github_owner="gh-owner",
+            projects_root=Path("/srv/projects"),
+            ssh_alias="forgejo-work",
+        )
+
+        for exception in (
+            OSError("preflight failed for secret-value"),
+            ValueError("preflight failed for secret-value"),
+        ):
+            with self.subTest(exception=type(exception).__name__):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with (
+                    patch("repo_bootstrap.cli.load_config", return_value=config),
+                    patch("repo_bootstrap.cli.ForgejoClient"),
+                    patch("repo_bootstrap.cli.GitHubClient"),
+                    patch("repo_bootstrap.cli.run_preflight", side_effect=exception),
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                ):
+                    code = main(
+                        ["doctor"],
+                        environ={"FORGEJO_TOKEN": "secret-value"},
+                    )
+
+                self.assertEqual(code, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(
+                    stderr.getvalue(),
+                    "error: preflight failed for <redacted>\n",
+                )
+
     def test_doctor_reports_missing_token_through_read_only_preflight(self):
         config = Config(
             forgejo_url="https://forgejo.example.test",

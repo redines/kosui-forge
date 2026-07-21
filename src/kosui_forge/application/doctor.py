@@ -12,6 +12,7 @@ from .contracts import (
     DoctorRequest,
     EventState,
     OperationEvent,
+    OperationError,
     OperationResult,
     OperationStatus,
     RecoveryInfo,
@@ -107,6 +108,7 @@ class DoctorService:
                 recovery=RecoveryInfo(
                     "Doctor is read-only; correct the reported error and rerun it."
                 ),
+                error=OperationError(clean(exc)),
                 cancellation_state=cancellation.state,
             )
 
