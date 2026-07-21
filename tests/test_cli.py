@@ -5,6 +5,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from kosui_forge.application.contracts import (
+    DoctorCheck,
+    DoctorRequest,
+    OperationResult,
+    OperationStatus,
+)
 from repo_bootstrap.cli import build_parser, confirm_plan, main
 from repo_bootstrap.config import Config
 from repo_bootstrap.errors import PartialFailure, SafetyError
@@ -193,6 +199,40 @@ class MainExitCodeTests(unittest.TestCase):
         self.assertEqual(code, 0)
         manager_type.assert_not_called()
         self.assertIn("PASS", stdout.getvalue())
+
+    def test_doctor_cli_renders_the_application_service_without_output_drift(self):
+        config = Config(
+            forgejo_url="https://forgejo.example.test",
+            forgejo_owner="owner",
+            github_owner="gh-owner",
+            projects_root=Path("/srv/projects"),
+            ssh_alias="forgejo-work",
+        )
+        result = OperationResult(
+            operation_id="doctor-1",
+            status=OperationStatus.SUCCEEDED,
+            checks=(DoctorCheck("all", True, "ready"),),
+        )
+        stdout = io.StringIO()
+
+        with (
+            patch("repo_bootstrap.cli.load_config", return_value=config),
+            patch("repo_bootstrap.cli.ForgejoClient"),
+            patch("repo_bootstrap.cli.GitHubClient"),
+            patch("repo_bootstrap.cli.build_doctor_service") as service_factory,
+            redirect_stdout(stdout),
+        ):
+            service_factory.return_value.run.return_value = result
+            code = main(
+                ["doctor", "--name", "sample", "--description", "A sample"],
+                environ={"FORGEJO_TOKEN": "secret-value"},
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stdout.getvalue(), "[PASS] all: ready\n")
+        request = service_factory.return_value.run.call_args.args[0]
+        self.assertIsInstance(request, DoctorRequest)
+        self.assertEqual(request.repository_name, "sample")
 
     def test_doctor_reports_missing_token_through_read_only_preflight(self):
         config = Config(

@@ -157,6 +157,40 @@ class PreflightTests(unittest.TestCase):
         )
         self.assertTrue(all(call[0] in {"git", "gh", "ssh"} for call in commands.calls))
 
+    def test_progress_is_ordered_and_cancellation_stops_at_a_read_only_boundary(self):
+        forgejo = FakeForgejo()
+        github = FakeGitHub()
+        commands = RecordingCommands()
+        emitted = []
+        cancellation = {"requested": False}
+
+        def report(check):
+            emitted.append(check)
+            cancellation["requested"] = True
+
+        with TemporaryDirectory() as directory:
+            result = run_preflight(
+                make_config(directory),
+                forgejo,
+                github,
+                token_present=True,
+                name="sample",
+                description="A sample",
+                private=True,
+                with_github=True,
+                command_runner=commands,
+                which=lambda executable: f"/usr/bin/{executable}",
+                reporter=report,
+                cancellation_requested=lambda: cancellation["requested"],
+            )
+
+        self.assertTrue(result.cancelled)
+        self.assertEqual(result.checks, tuple(emitted))
+        self.assertEqual([check.name for check in emitted], ["runtime-platform"])
+        self.assertEqual(commands.calls, [])
+        self.assertEqual(forgejo.calls, [])
+        self.assertEqual(github.calls, [])
+
     def test_missing_executables_fail_with_windows_install_guidance(self):
         with TemporaryDirectory() as directory:
             report = self.run_check(
