@@ -1,0 +1,24 @@
+# This file contains metadata only. Never put a token, password, or private key here.
+forgejo_url = "https://forgejo.example.test"
+forgejo_owner = "forgejo-owner"
+github_owner = "github-owner"
+github_host = "github.com"
+projects_root = "/home/you/projects"
+ssh_alias = "forgejo-work"
+default_branch = "main"
+forgejo_token_env = "FORGEJO_TOKEN"
+privacy_policy = "private"
+sync_on_commit = true
+mirror_interval = "8h"
+authentication_mode = "per-repository-deploy-key"
+
+# mirror-all will report these as intentionally skipped and will not inspect or
+# modify their push mirrors.
+skip_repositories = [
+  "forgejo-owner/repository-with-manually-managed-mirror",
+]
+
+# Explicit owner mapping prevents cross-forge collisions. Unmapped owners are
+# reported as blockers instead of being guessed.
+[owner_map]
+forgejo-owner = "github-owner"

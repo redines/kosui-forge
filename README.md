@@ -1,0 +1,312 @@
+# repo-bootstrap
+
+`repo-bootstrap` creates and clones Forgejo repositories and can configure matching GitHub push mirrors. Ordinary creation is unconditionally private on both services. Configuration cannot opt into public visibility.
+
+The tool is independently packaged under `tools/repo-bootstrap`; run its development commands from this directory.
+
+## Safety model
+
+- `create`, `mirror-all`, and the compatibility alias `batch` automatically run the same read-only checks as `doctor` before any repository, mirror, deploy-key, Git, or directory write.
+- Every mutating command displays a complete plan and prompts before the first side effect. `--yes` is the only non-interactive bypass.
+- Public creation requires `--public` plus interactive confirmation. Non-interactive public creation additionally requires `--yes --ack-public NAME`.
+- `--dry-run` and `doctor` perform reads only. Dry-run still authenticates and inspects local paths, repositories, visibility, ownership, mirrors, and deploy keys so its result is useful.
+- Forgejo must use HTTPS. The built-in HTTP transport refuses redirects, preventing an `Authorization` header from being forwarded to another origin.
+- Tokens, passwords, private keys, authenticated URLs, and headers are not accepted in config or command arguments. Diagnostics and stage journals redact common secret forms.
+- Existing resources are reused only when owner, name, privacy, description, admin permission, origin, branch, mirror policy, and deploy key match. Missing or ambiguous metadata fails closed.
+- Mirror authentication uses Forgejo's unique per-repository SSH key. The matching GitHub deploy key is writable and repository-scoped.
+- GitHub Actions are disabled for mirror-only repositories.
+- The tool never deletes or automatically rolls back resources. Existing resources and partial results are retained for inspection and safe resume.
+
+## Requirements
+
+- Python 3.11 or newer on Linux, macOS, or Windows.
+- Parseable `git`, `gh`, and OpenSSH client versions on `PATH`.
+- An SSH host alias for Forgejo, resolvable with `ssh -G ALIAS`.
+- Forgejo 11 or newer with push-mirror API support.
+- A Forgejo API token available through the configured environment-variable name. The authenticated user must be able to create repositories for the target owner and administer push mirrors.
+- An authenticated local `gh` session for the configured GitHub host. The account must be able to create/administer repositories for the configured user or organization.
+- Forgejo-to-GitHub SSH reachability and trusted GitHub host keys.
+
+Platform path and command behavior is unit-tested for Linux, macOS, and Windows. Run `doctor` on each real machine before relying on it; this repository does not claim that mocked platform tests replace an operational check.
+
+The tool reports platform-specific install guidance when a command is missing. It never installs software or modifies the PC automatically.
+
+## Install
+
+From `tools/repo-bootstrap`:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
+repo-bootstrap --version
+```
+
+PowerShell activation uses `.venv\Scripts\Activate.ps1`.
+
+## Global non-secret configuration
+
+Write the policy file with the built-in bootstrap command:
+
+```sh
+repo-bootstrap configure \
+  --forgejo-url https://forgejo.example.test \
+  --forgejo-owner forgejo-owner \
+  --github-owner github-owner \
+  --github-host github.com \
+  --projects-root "$HOME/projects" \
+  --ssh-alias forgejo-work
+```
+
+The command shows its plan and writes an owner-only file (`0600` where supported). Use `--yes` only after reviewing that plan. Existing config is never replaced unless `--force` is explicit; replacement still requires confirmation or `--yes`.
+
+Default locations:
+
+- Linux: `$XDG_CONFIG_HOME/repo-bootstrap/config.toml`, or `~/.config/repo-bootstrap/config.toml`.
+- macOS: `~/Library/Application Support/repo-bootstrap/config.toml`.
+- Windows: `%APPDATA%\repo-bootstrap\config.toml`.
+
+The generated file contains only non-secret settings: HTTPS Forgejo URL, owners, GitHub host, project root, SSH alias, owner mapping, `privacy_policy="private"`, `sync_on_commit=true`, fallback mirror interval, and `authentication_mode="per-repository-deploy-key"`. See `config.example.toml`.
+
+Load the Forgejo token from a protected credential source into `FORGEJO_TOKEN` (or the configured variable name). Do not paste the value into the command line, config, Git remote, scheduler prompt, shell history, or logs.
+
+## Doctor and automatic preflight
+
+Run the global check:
+
+```sh
+repo-bootstrap doctor
+```
+
+Inspect repository-specific collision state without writes:
+
+```sh
+repo-bootstrap doctor --name sample --description "Private sample repository"
+```
+
+Doctor reports individual `PASS`/`FAIL` results for:
+
+- supported OS and Python runtime;
+- `git`, `gh`, and `ssh` presence and parseable versions;
+- `gh auth status --hostname HOST` and a non-destructive GitHub `/user` API request;
+- HTTPS Forgejo reachability, version, authenticated identity, target owner, repository-create permission, mirror-admin permission, and mirror API support;
+- GitHub owner existence plus create/admin permission;
+- SSH alias resolution;
+- project-root existence or safe creation, writability, and destination collision state;
+- repository name, description, and owner mapping;
+- credential environment-variable presence without printing its value;
+- existing Forgejo/GitHub owner, visibility, description, and admin permission;
+- mirror/deploy-key uniqueness, `use_ssh=true`, `sync_on_commit=true`, generated public key, and a present empty `last_error`.
+
+Any failed check returns nonzero. Create and mirror operations stop before instantiating their mutating workflow when preflight fails.
+
+## Create and clone a private repository
+
+Preview all reads and the plan:
+
+```sh
+repo-bootstrap create sample \
+  --description "Private sample repository" \
+  --dry-run
+```
+
+Apply after the interactive plan confirmation:
+
+```sh
+repo-bootstrap create sample \
+  --description "Private sample repository"
+```
+
+Private creation sends `private=true` and initializes the configured default branch. The clone URL is `ssh://git@SSH_ALIAS/OWNER/NAME.git`; the tool verifies `origin` and the checked-out default branch. A destination that is not the exact expected working tree is a blocker.
+
+For reviewed non-interactive private automation, add `--yes`.
+
+## Create the private GitHub mirror
+
+```sh
+repo-bootstrap create sample \
+  --description "Private sample repository" \
+  --github
+```
+
+The idempotent sequence is:
+
+1. detect or create the private GitHub repository through authenticated `gh api`;
+2. detect or create the Forgejo push mirror with `use_ssh=true`, `sync_on_commit=true`, and the configured fallback interval;
+3. retrieve Forgejo's generated public key;
+4. detect or register that key as `read_only=false`, titled `Forgejo mirror: OWNER/NAME`;
+5. disable GitHub Actions;
+6. trigger `POST /repos/{owner}/{repo}/push_mirrors-sync`;
+7. poll and require the mirror response to contain `last_error` with the exact empty value.
+
+GitHub repository creation and all GitHub API operations include the configured `--hostname` and pass JSON through standard input. No credential is placed in process arguments.
+
+## Explicit public opt-in
+
+Interactive public creation:
+
+```sh
+repo-bootstrap create public-sample \
+  --description "Intentionally public sample" \
+  --github \
+  --public
+```
+
+The prompt requires the exact text `PUBLIC public-sample` and then `yes` for the plan.
+
+Non-interactive public creation needs the additional acknowledgement:
+
+```sh
+repo-bootstrap create public-sample \
+  --description "Intentionally public sample" \
+  --github \
+  --public \
+  --yes \
+  --ack-public public-sample
+```
+
+`--ack-public` without `--public`, a mismatched name, or `--public --yes` without the acknowledgement fails before config or API access. `mirror-all` never creates public repositories.
+
+## Mirror discovery and scheduling
+
+Read-only discovery:
+
+```sh
+repo-bootstrap mirror-all --dry-run
+repo-bootstrap mirror-all --dry-run --owner forgejo-owner
+repo-bootstrap mirror-all --dry-run --repo sample --repo forgejo-owner/another
+```
+
+Apply after a second all-repository inspection and plan confirmation:
+
+```sh
+repo-bootstrap mirror-all
+```
+
+The command paginates accessible Forgejo repositories, performs a full read-only inspection of every selected repository, and starts no write if any selected repository is blocked. Unmatched explicit owner/repository filters are blockers rather than silent no-ops. Configured `skip_repositories` are not inspected or altered. Per-repository permission failures are reported, including owners where the token lacks mirror administration.
+
+`batch` remains a compatibility alias for `mirror-all`. For scheduling, run `mirror-all --dry-run` first and preserve its exit status/output. Schedule the mutating command with `--yes` only after a clean audit, using the scheduler's protected credential environment.
+
+## Stage journals, resume, and rollback
+
+After confirmation and before the first mutation, the tool writes a non-secret owner-only stage journal:
+
+- Linux: `$XDG_STATE_HOME/repo-bootstrap`, or `~/.local/state/repo-bootstrap`.
+- macOS: `~/Library/Application Support/repo-bootstrap/state`.
+- Windows: `%LOCALAPPDATA%\repo-bootstrap\state`.
+
+The journal records created versus pre-existing stages and safe recovery guidance. It never stores token values, headers, or private keys.
+
+On failure:
+
+1. retain every repository, clone, mirror, and key;
+2. inspect the error and journal;
+3. correct authentication, permissions, SSH trust, visibility, description, or collision state;
+4. rerun the exact command.
+
+Never delete a pre-existing resource during rollback. If explicit cleanup is approved, remove only resources proven to belong to the disposable repository, verify owner/name before each action, and prefer service UIs for the final destructive confirmation.
+
+## Exit codes
+
+- `0`: checks/work completed with no blockers.
+- `2`: configuration, preflight, safety, collision, validation, or API failure before a known durable partial state.
+- `3`: partial failure after one or more durable stages may have changed; follow the journal and rerun guidance.
+- `4`: mirror discovery completed with one or more per-repository blockers.
+
+## Forgejo global admin recommendations
+
+An administrator can reinforce policy globally:
+
+```ini
+[repository]
+DEFAULT_PRIVATE = private
+DEFAULT_PUSH_CREATE_PRIVATE = true
+
+[mirror]
+DEFAULT_INTERVAL = 8h
+```
+
+Exact config syntax/units depend on the installed Forgejo release. These settings reinforce defaults only. Mirror destination and authentication remain per repository; Forgejo 11 has no supported global SSH private credential for built-in push mirrors.
+
+## Authentication alternatives (not defaults)
+
+- GitHub prohibits reusing one deploy key across multiple repositories. Unique writable deploy keys are therefore the default.
+- A manually managed GitHub machine user can reuse one account SSH key, but Forgejo's supported built-in SSH mirror flow does not accept a custom shared private key; its blast radius includes every repository granted to that account.
+- A shared HTTPS fine-grained token can be supplied per mirror, but centralizes write capability and complicates rotation.
+- GitHub App installation tokens are preferable for custom integrations, but expire and are not natively refreshed by Forgejo push mirrors.
+
+## Tests
+
+From this directory:
+
+```sh
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+ruff check src tests
+ruff format --check src tests
+mypy src
+```
+
+The local suite covers private defaults, interactive/non-interactive public gates, no-write preflight, missing/stale tools and auth, unreachable services, owner/admin permission failures, HTTPS/redirect handling, API payloads, path behavior on Linux/macOS/Windows, repository and key collisions, mirror verification, dry-run behavior, filter correctness, stage journals, partial failures, idempotency, and redaction.
+
+## Local private E2E checklist
+
+Use a unique disposable name and do not approve cleanup until all evidence is inspected:
+
+```sh
+export REPO_BOOTSTRAP_E2E_REPO="repo-bootstrap-e2e-$(date +%Y%m%d-%H%M%S)"
+export REPO_BOOTSTRAP_E2E_CONFIG="$HOME/.config/repo-bootstrap/config.toml"
+export REPO_BOOTSTRAP_E2E_GITHUB_OWNER="replace-with-configured-owner"
+export REPO_BOOTSTRAP_E2E_GITHUB_HOST="github.com"
+export REPO_BOOTSTRAP_E2E_PROJECTS_ROOT="$HOME/projects"
+
+repo-bootstrap --config "$REPO_BOOTSTRAP_E2E_CONFIG" doctor \
+  --name "$REPO_BOOTSTRAP_E2E_REPO" \
+  --description "Disposable repo-bootstrap private mirror E2E"
+
+repo-bootstrap --config "$REPO_BOOTSTRAP_E2E_CONFIG" create \
+  "$REPO_BOOTSTRAP_E2E_REPO" \
+  --description "Disposable repo-bootstrap private mirror E2E" \
+  --github \
+  --dry-run
+
+repo-bootstrap --config "$REPO_BOOTSTRAP_E2E_CONFIG" create \
+  "$REPO_BOOTSTRAP_E2E_REPO" \
+  --description "Disposable repo-bootstrap private mirror E2E" \
+  --github
+```
+
+Then verify:
+
+```sh
+# Clone/origin/default branch
+git -C "$REPO_BOOTSTRAP_E2E_PROJECTS_ROOT/$REPO_BOOTSTRAP_E2E_REPO" remote get-url origin
+git -C "$REPO_BOOTSTRAP_E2E_PROJECTS_ROOT/$REPO_BOOTSTRAP_E2E_REPO" branch --show-current
+
+# GitHub is private and Actions are disabled
+gh api --hostname "$REPO_BOOTSTRAP_E2E_GITHUB_HOST" \
+  "/repos/$REPO_BOOTSTRAP_E2E_GITHUB_OWNER/$REPO_BOOTSTRAP_E2E_REPO" \
+  --jq '.private'
+gh api --hostname "$REPO_BOOTSTRAP_E2E_GITHUB_HOST" \
+  "/repos/$REPO_BOOTSTRAP_E2E_GITHUB_OWNER/$REPO_BOOTSTRAP_E2E_REPO/actions/permissions" \
+  --jq '.enabled'
+
+# Mirror/key health and idempotent discovery
+repo-bootstrap --config "$REPO_BOOTSTRAP_E2E_CONFIG" mirror-all \
+  --dry-run \
+  --repo "$REPO_BOOTSTRAP_E2E_REPO"
+
+# Idempotent create rerun: review the plan, expect existing/verified stages
+repo-bootstrap --config "$REPO_BOOTSTRAP_E2E_CONFIG" create \
+  "$REPO_BOOTSTRAP_E2E_REPO" \
+  --description "Disposable repo-bootstrap private mirror E2E" \
+  --github
+```
+
+The opt-in test pushes a unique branch and tag, verifies both refs on GitHub, and retains all resources:
+
+```sh
+export REPO_BOOTSTRAP_E2E=1
+PYTHONPATH=src python3 -m unittest tests.test_e2e -v
+```
+
+Inspect Forgejo's mirror page, the writable GitHub deploy key, private visibility, and remote refs. Cleanup is never automatic. After explicit approval, delete the exact GitHub and Forgejo disposable repositories in their service UIs, then remove only the exact local disposable clone. Do not use wildcard cleanup commands.
