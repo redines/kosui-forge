@@ -6,7 +6,7 @@
 
 Kosui Forge is the pre-1.0 foundation of a cross-platform, GitHub Desktop-like repository manager for Forgejo and GitHub. Its tested `repo-bootstrap` engine creates and clones Forgejo repositories and can configure matching GitHub push mirrors. Ordinary creation is private on both services, and configuration cannot opt into public visibility.
 
-The `kosui_forge` application layer exposes immutable, UI-neutral Doctor requests, progress events, results, resource links, recovery details, and cooperative cancellation state. Its Doctor use case delegates policy to the existing read-only preflight core and redacts every event and result before returning it. A native desktop presentation adapter is planned separately; this foundation does not claim that a production GUI or portable native release exists yet.
+The `kosui_forge` application layer exposes immutable, UI-neutral Doctor requests, progress events, results, resource links, recovery details, and cooperative cancellation state. Its Doctor use case delegates policy to the existing read-only preflight core and redacts every event and result before returning it. The `kosui-forge` PySide6 desktop entry point provides a native application shell and runs that same Doctor service off the GUI thread. This interpreted desktop slice is not a signed, packaged, or portable native release artifact.
 
 ## Version and compatibility policy
 
@@ -32,7 +32,7 @@ The enforced dependency rule, layer terminology, composition roots, and compatib
 ## Requirements
 
 - Python 3.11 or newer on Linux, macOS, or Windows.
-- Python dependencies `githubkit[all-schemas]>=0.16.0` and `pyforgejo>=2.0.7,<3`; package installation resolves them automatically.
+- Python dependencies `githubkit[all-schemas]>=0.16.0`, `PySide6>=6.8,<6.12`, and `pyforgejo>=2.0.7,<3`; package installation resolves them automatically.
 - Parseable `git`, `gh`, and OpenSSH client versions on `PATH`.
 - An SSH host alias for Forgejo, resolvable with `ssh -G ALIAS`.
 - Forgejo 11 or newer with push-mirror API support.
@@ -53,6 +53,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
 repo-bootstrap --version
+kosui-forge
 ```
 
 PowerShell activation uses `.venv\Scripts\Activate.ps1`.
@@ -86,6 +87,8 @@ The generated file contains only non-secret settings: HTTPS Forgejo URL, owners,
 Load the Forgejo token from a protected credential source into `FORGEJO_TOKEN` (or the configured variable name). Do not paste the value into the command line, config, Git remote, scheduler prompt, shell history, or logs.
 
 ## Doctor and automatic preflight
+
+The native desktop opens Doctor from its primary navigation (or with `Ctrl+D`), streams typed checks without blocking the GUI, and provides a copy-safe redacted diagnostic. Closing the window during a run requests cooperative cancellation and waits for a read-only safe point rather than terminating the worker thread.
 
 Run the global check:
 
