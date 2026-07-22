@@ -19,7 +19,6 @@ permissions:
   contents: read
 
 env:
-  DEFAULT_RUNNER: ubuntu-latest
   PYTHON_VERSION: "3.11"
   SHARED_WORKFLOWS_REF: ddafef6593bffc454668cfcb0035faf886fccd3f
   SONAR_PROJECT_KEY: kosui-forge
@@ -28,7 +27,7 @@ env:
 jobs:
   verify:
     name: Verify, build, and package
-    runs-on: ${{ env.DEFAULT_RUNNER }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Check out repository
@@ -93,8 +92,8 @@ jobs:
       issues: write
     uses: pontus-local/kosui-workflows/.forgejo/workflows/sonar-issues.yml@ddafef6593bffc454668cfcb0035faf886fccd3f
     with:
-      runner: ${{ env.DEFAULT_RUNNER }}
-      project_key: ${{ env.SONAR_PROJECT_KEY }}
+      runner: ubuntu-latest
+      project_key: kosui-forge
       source_ref: ddafef6593bffc454668cfcb0035faf886fccd3f
       allow_unpinned_source: false
       timeout_minutes: 15

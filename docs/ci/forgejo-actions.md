@@ -15,13 +15,13 @@ The workflow intentionally does not publish a release. Tag builds stop at verifi
 
 ## Runner labels
 
-The workflow defaults to `ubuntu-latest`. Repositories that require a self-hosted runner can change the top-level `DEFAULT_RUNNER` environment variable in `.forgejo/workflows/ci.yml` after verifying the runner provides:
+The workflow currently uses the explicit `ubuntu-latest` label for both the local verification job and the shared Sonar issue-synchronization job. If the registered self-hosted runner uses a different label, update both reviewed `runner`/`runs-on` values in `.forgejo/workflows/ci.yml` together after verifying that the runner provides:
 
 - Python 3.11 support through `actions/setup-python`;
 - Git, curl, unzip, and Bash;
 - network reachability to Forgejo and SonarQube.
 
-`DEFAULT_RUNNER` controls where the local `verify` job runs and which label is passed into the shared `sync_sonar_issues` reusable workflow. The repository-local `scripts/ci/run-sonar.sh` currently downloads the published Linux x64 `sonar-scanner-cli` archive, so the Sonar-enabled `verify` path must stay on a Linux x64 runner until that script is intentionally generalized and re-reviewed.
+The repository-local `scripts/ci/run-sonar.sh` currently downloads the published Linux x64 `sonar-scanner-cli` archive, so the Sonar-enabled `verify` path must stay on a Linux x64 runner until that script is intentionally generalized and re-reviewed.
 
 No PySide6 smoke test is wired into CI yet because the repository does not ship a production desktop shell. Add that only after the desktop entry point and reviewed runner support both exist.
 
@@ -94,7 +94,7 @@ export SONAR_PROJECT_KEY=kosui-forge
 
 ## Troubleshooting
 
-- `actions/setup-python` cannot satisfy Python 3.11: switch `DEFAULT_RUNNER` to a reviewed runner image that can, or preinstall Python 3.11 there.
+- `actions/setup-python` cannot satisfy Python 3.11: update both explicit runner labels to a reviewed runner that can, or preinstall Python 3.11 there.
 - SonarQube validation fails before the scan starts: confirm `SONAR_HOST_URL` includes `http://` or `https://` and that `SONAR_TOKEN` is defined.
 - The quality gate fails: download the run artifacts, inspect `coverage.xml` and `test-results/pytest.xml`, then review the SonarQube project dashboard for the failing condition.
 - `sync_sonar_issues` fails while `verify` passed: confirm the run happened on `main`, the shared repository is still reachable at the pinned commit, and the `sync_sonar_issues` job still has `issues: write` permission.

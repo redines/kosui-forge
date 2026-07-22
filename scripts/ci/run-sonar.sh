@@ -36,7 +36,5 @@ project_version="${SONAR_PROJECT_VERSION:-$(python -c 'import kosui_forge; print
 "${scanner_home}/bin/sonar-scanner" \
   -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
   -Dsonar.projectVersion="${project_version}" \
-  -Dsonar.host.url="${SONAR_HOST_URL}" \
-  -Dsonar.token="${SONAR_TOKEN}" \
   -Dsonar.qualitygate.wait=true \
   -Dsonar.qualitygate.timeout=300
