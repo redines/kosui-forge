@@ -6,7 +6,7 @@
 
 Kosui Forge is the pre-1.0 foundation of a cross-platform, GitHub Desktop-like repository manager for Forgejo and GitHub. Its tested `repo-bootstrap` engine creates and clones Forgejo repositories and can configure matching GitHub push mirrors. Ordinary creation is private on both services, and configuration cannot opt into public visibility.
 
-The `kosui_forge` application package exposes immutable, UI-neutral Doctor requests, progress events, results, resource links, recovery details, and cooperative cancellation state. Its Doctor service delegates policy to the existing read-only preflight core and redacts every event and result before returning it. A native desktop adapter is planned separately; this foundation does not claim that a production GUI or portable native release exists yet.
+The `kosui_forge` application layer exposes immutable, UI-neutral Doctor requests, progress events, results, resource links, recovery details, and cooperative cancellation state. Its Doctor use case delegates policy to the existing read-only preflight core and redacts every event and result before returning it. A native desktop presentation adapter is planned separately; this foundation does not claim that a production GUI or portable native release exists yet.
 
 ## Version and compatibility policy
 
@@ -14,7 +14,7 @@ Kosui Forge is currently `0.2.0`, an explicit Semantic Versioning pre-1.0 releas
 
 The `repo-bootstrap` executable remains a compatibility CLI during the product migration. Its command names, arguments, exit codes, private-default policy, explicit public acknowledgement, dry-run reads, collision gates, stage journals, redaction, and default terminal rendering remain compatibility commitments. Existing configuration and state paths retain the `repo-bootstrap` name. The internal `repo_bootstrap` Python package remains available to installed consumers, but symbols not documented as application contracts may still evolve before 1.0.
 
-Architecture and packaging decisions are documented in [`docs/architecture/cross-platform-gui-plan.md`](docs/architecture/cross-platform-gui-plan.md), imported from the validated source spike identified in that document. Third-party notices and final-artifact SBOM work are tracked in [`docs/third-party-notices-and-sbom.md`](docs/third-party-notices-and-sbom.md); that plan is not a completed legal review.
+The enforced dependency rule, layer terminology, composition roots, and compatibility-module migration map are documented in [`docs/architecture/clean-architecture.md`](docs/architecture/clean-architecture.md). GUI and packaging decisions are documented in [`docs/architecture/cross-platform-gui-plan.md`](docs/architecture/cross-platform-gui-plan.md), which refers back to the same layer terminology instead of redefining it. Third-party notices and final-artifact SBOM work are tracked in [`docs/third-party-notices-and-sbom.md`](docs/third-party-notices-and-sbom.md); that plan is not a completed legal review.
 
 ## Safety model
 
@@ -57,7 +57,7 @@ repo-bootstrap --version
 
 PowerShell activation uses `.venv\Scripts\Activate.ps1`.
 
-GitHub and Forgejo API operations use GitHubKit and pyforgejo respectively. The `gh` CLI remains a required local authentication gate and supplies the GitHub token to GitHubKit in memory; production code does not use `gh api` as its API client. The adapters and their contract tests live in [`src/repo_bootstrap/github.py`](src/repo_bootstrap/github.py), [`src/repo_bootstrap/forgejo.py`](src/repo_bootstrap/forgejo.py), and [`tests/test_clients.py`](tests/test_clients.py).
+GitHub and Forgejo API operations use GitHubKit and pyforgejo respectively. The `gh` CLI remains a required local authentication gate and supplies the GitHub token to GitHubKit in memory; production code does not use `gh api` as its API client. The current compatibility adapters and their contract tests live in [`src/repo_bootstrap/github.py`](src/repo_bootstrap/github.py), [`src/repo_bootstrap/forgejo.py`](src/repo_bootstrap/forgejo.py), and [`tests/test_clients.py`](tests/test_clients.py); their incremental target boundaries and removal gates are recorded in the Clean Architecture decision.
 
 ## Global non-secret configuration
 
