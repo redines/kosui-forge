@@ -255,13 +255,23 @@ Exact config syntax/units depend on the installed Forgejo release. These setting
 From the repository root:
 
 ```sh
-PYTHONPATH=src python3 -m unittest discover -s tests -v
-ruff check src tests
-ruff format --check src tests
-mypy src
+python3 -m venv .venv
+. .venv/bin/activate
+./scripts/ci/verify.sh
 ```
 
 The local suite covers private defaults, interactive/non-interactive public gates, no-write preflight, missing/stale tools and auth, unreachable services, owner/admin permission failures, HTTPS/redirect handling, SDK boundaries and API payloads, Forgejo 11.0.16 response contracts, path behavior on Linux/macOS/Windows, repository and key collisions, mirror verification, dry-run behavior, filter correctness, stage journals, partial failures, idempotency, and redaction.
+
+## Forgejo Actions CI and SonarQube
+
+The repository-local Forgejo Actions workflow lives at [`.forgejo/workflows/ci.yml`](.forgejo/workflows/ci.yml). It runs pull request, `main`, version-tag, and manual verification jobs; uploads downloadable build/test artifacts for every run; performs the blocking SonarQube quality gate on reviewed default-branch runs; and then calls the shared SonarQube issue synchronization workflow pinned to `pontus-local/kosui-workflows` commit `ddafef6593bffc454668cfcb0035faf886fccd3f`.
+
+Required Actions secrets:
+
+- `SONAR_HOST_URL`
+- `SONAR_TOKEN`
+
+The default run token is mapped to the shared workflow as `FORGEJO_TOKEN`, so no extra long-lived issue-write secret is required. Local and CI usage details, required checks, runner assumptions, and troubleshooting are documented in [`docs/ci/forgejo-actions.md`](docs/ci/forgejo-actions.md).
 
 ## License and redistribution planning
 
