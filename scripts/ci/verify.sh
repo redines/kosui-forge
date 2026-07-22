@@ -5,7 +5,15 @@ artifacts_dir="${CI_ARTIFACTS_DIR:-ci-artifacts}"
 smoke_venv="${CI_SMOKE_VENV:-.venv-smoke}"
 root_dir="$(pwd)"
 
-rm -rf "$artifacts_dir" "$smoke_venv" dist build coverage.xml test-results
+cleanup() {
+  rm -rf "$artifacts_dir" "$smoke_venv" dist build coverage.xml test-results .sonar
+}
+
+if [[ "${GITHUB_ACTIONS:-false}" != "true" && "${CI_KEEP_ARTIFACTS:-0}" != "1" ]]; then
+  trap cleanup EXIT
+fi
+
+cleanup
 mkdir -p "$artifacts_dir" test-results
 
 python -m pip install --upgrade pip

@@ -271,7 +271,7 @@ Required Actions secrets:
 - `SONAR_HOST_URL`
 - `SONAR_TOKEN`
 
-The default run token is mapped to the shared workflow as `FORGEJO_TOKEN`, so no extra long-lived issue-write secret is required. Local and CI usage details, required checks, runner assumptions, and troubleshooting are documented in [`docs/ci/forgejo-actions.md`](docs/ci/forgejo-actions.md).
+The default run token is mapped to the shared workflow as `FORGEJO_TOKEN`, so no extra long-lived issue-write secret is required. Pull-request verification keeps workflow permissions read-only; only the default-branch Sonar issue-sync job receives `issues: write`. Local and CI usage details, required checks, runner assumptions, and troubleshooting are documented in [`docs/ci/forgejo-actions.md`](docs/ci/forgejo-actions.md).
 
 ## License and redistribution planning
 

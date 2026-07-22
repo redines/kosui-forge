@@ -15,11 +15,13 @@ The workflow intentionally does not publish a release. Tag builds stop at verifi
 
 ## Runner labels
 
-The workflow defaults to `ubuntu-latest` because the shared SonarQube synchronization workflow also defaults to that label. Repositories that require a self-hosted runner can change the top-level `DEFAULT_RUNNER` environment variable in `.forgejo/workflows/ci.yml` after verifying the runner provides:
+The workflow defaults to `ubuntu-latest`. Repositories that require a self-hosted runner can change the top-level `DEFAULT_RUNNER` environment variable in `.forgejo/workflows/ci.yml` after verifying the runner provides:
 
 - Python 3.11 support through `actions/setup-python`;
 - Git, curl, unzip, and Bash;
 - network reachability to Forgejo and SonarQube.
+
+`DEFAULT_RUNNER` controls where the local `verify` job runs and which label is passed into the shared `sync_sonar_issues` reusable workflow. The repository-local `scripts/ci/run-sonar.sh` currently downloads the published Linux x64 `sonar-scanner-cli` archive, so the Sonar-enabled `verify` path must stay on a Linux x64 runner until that script is intentionally generalized and re-reviewed.
 
 No PySide6 smoke test is wired into CI yet because the repository does not ship a production desktop shell. Add that only after the desktop entry point and reviewed runner support both exist.
 
@@ -30,7 +32,7 @@ Repository or organization Actions secrets:
 - `SONAR_HOST_URL`: base SonarQube URL.
 - `SONAR_TOKEN`: token with Execute Analysis and Browse access for the Kosui Forge project.
 
-The workflow grants `contents: read` and `issues: write`. The default run token is passed to the shared synchronization workflow as `FORGEJO_TOKEN` so Sonar-managed issues can be created and updated without introducing an extra long-lived repository secret.
+The workflow keeps top-level permissions at `contents: read`. Only the default-branch `sync_sonar_issues` job receives `issues: write`, and it passes the default run token to the shared synchronization workflow as `FORGEJO_TOKEN` so Sonar-managed issues can be created and updated without introducing an extra long-lived repository secret. Pull-request verification never runs repository code with issue-write scope.
 
 ## Required checks
 
@@ -46,7 +48,7 @@ The `verify` job is the main CI gate. It:
 8. runs `git diff --check`;
 9. writes checksums and build metadata into the artifact bundle.
 
-The workflow uploads `coverage.xml`, `test-results/`, `dist/`, and `ci-artifacts/` as a downloadable artifact for every run.
+The workflow uploads `coverage.xml`, `test-results/`, `dist/`, and `ci-artifacts/` as a downloadable artifact for every run. Those local outputs are ignored in Git, and `./scripts/ci/verify.sh` cleans them automatically on exit outside Forgejo Actions unless `CI_KEEP_ARTIFACTS=1` is set.
 
 ## SonarQube flow
 
@@ -95,5 +97,5 @@ export SONAR_PROJECT_KEY=kosui-forge
 - `actions/setup-python` cannot satisfy Python 3.11: switch `DEFAULT_RUNNER` to a reviewed runner image that can, or preinstall Python 3.11 there.
 - SonarQube validation fails before the scan starts: confirm `SONAR_HOST_URL` includes `http://` or `https://` and that `SONAR_TOKEN` is defined.
 - The quality gate fails: download the run artifacts, inspect `coverage.xml` and `test-results/pytest.xml`, then review the SonarQube project dashboard for the failing condition.
-- `sync_sonar_issues` fails while `verify` passed: confirm the run happened on `main`, the shared repository is still reachable at the pinned commit, and the run token still has `issues: write`.
+- `sync_sonar_issues` fails while `verify` passed: confirm the run happened on `main`, the shared repository is still reachable at the pinned commit, and the `sync_sonar_issues` job still has `issues: write` permission.
 - Tag builds should never publish automatically. If a release process is later added, keep it in a separate reviewed workflow with explicit human publication control.

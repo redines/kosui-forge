@@ -17,7 +17,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 env:
   DEFAULT_RUNNER: ubuntu-latest
@@ -89,6 +88,9 @@ jobs:
     name: Sync SonarQube issues
     needs: verify
     if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_sonar)) }}
+    permissions:
+      contents: read
+      issues: write
     uses: pontus-local/kosui-workflows/.forgejo/workflows/sonar-issues.yml@ddafef6593bffc454668cfcb0035faf886fccd3f
     with:
       runner: ${{ env.DEFAULT_RUNNER }}

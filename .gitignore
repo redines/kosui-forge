@@ -12,8 +12,12 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+coverage.xml
+test-results/
+.sonar/
 
 # Packaging output and generated metadata
 *.egg-info/
 build/
 dist/
+ci-artifacts/
