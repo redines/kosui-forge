@@ -1,18 +1,17 @@
-class RepoToolingError(Exception):
-    """Base class for expected command failures."""
+"""Compatibility exports for the domain error taxonomy."""
 
+from kosui_forge.domain.errors import (
+    ApiError,
+    ConfigError,
+    PartialFailure,
+    RepoToolingError,
+    SafetyError,
+)
 
-class ConfigError(RepoToolingError):
-    """Configuration is missing or unsafe."""
-
-
-class SafetyError(RepoToolingError):
-    """An operation failed a safety gate."""
-
-
-class ApiError(RepoToolingError):
-    """A remote API operation failed."""
-
-
-class PartialFailure(RepoToolingError):
-    """An operation stopped after creating some resources."""
+__all__ = [
+    "ApiError",
+    "ConfigError",
+    "PartialFailure",
+    "RepoToolingError",
+    "SafetyError",
+]
