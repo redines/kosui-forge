@@ -24,6 +24,14 @@ class PackageBoundaryTests(unittest.TestCase):
         ]
 
         self.assertEqual(missing, [])
+        self.assertEqual(
+            {
+                path.name
+                for path in PACKAGE_ROOT.iterdir()
+                if path.is_dir() and (path / "__init__.py").is_file()
+            },
+            set(LAYERS),
+        )
         self.assertTrue((PACKAGE_ROOT / "presentation/cli/__init__.py").is_file())
         self.assertTrue((PACKAGE_ROOT / "infrastructure/cli.py").is_file())
 
@@ -53,6 +61,18 @@ class PackageBoundaryTests(unittest.TestCase):
             (("kosui_forge.domain.one", "kosui_forge.domain.two"),),
         )
 
+    def test_unreviewed_source_packages_are_rejected(self):
+        violations = find_import_violations(FIXTURES / "forbidden")
+
+        self.assertTrue(
+            any(
+                violation.path == Path("experimental/bad.py")
+                and violation.imported == "kosui_forge.experimental.bad"
+                and "outside the reviewed" in violation.reason
+                for violation in violations
+            )
+        )
+
     def test_relative_dynamic_imports_resolve_the_current_module_package(self):
         violations = find_import_violations(FIXTURES / "forbidden")
 
@@ -70,6 +90,24 @@ class PackageBoundaryTests(unittest.TestCase):
             )
         )
 
+    def test_parent_relative_imports_to_inward_layers_are_accepted(self):
+        self.assertFalse(
+            any(
+                violation.path == Path("application/relative_parent.py")
+                for violation in find_import_violations(FIXTURES / "allowed")
+            )
+        )
+
+    def test_parent_relative_imports_to_outward_layers_are_rejected(self):
+        self.assertTrue(
+            any(
+                violation.path == Path("domain/relative.py")
+                and violation.imported == "kosui_forge.infrastructure"
+                and "outward layer infrastructure" in violation.reason
+                for violation in find_import_violations(FIXTURES / "forbidden")
+            )
+        )
+
     def test_package_facades_and_builtin_dynamic_aliases_are_rejected(self):
         violations = find_import_violations(FIXTURES / "forbidden")
         observed = {(violation.path, violation.imported) for violation in violations}
@@ -78,10 +116,15 @@ class PackageBoundaryTests(unittest.TestCase):
         self.assertIn(
             (Path("domain/dynamic.py"), "kosui_forge.adapters.doctor"), observed
         )
+        self.assertIn(
+            (Path("domain/dynamic.py"), "kosui_forge.infrastructure.doctor"), observed
+        )
 
     def test_forbidden_import_fixture_proves_each_boundary_is_enforced(self):
         violations = find_import_violations(FIXTURES / "forbidden")
-        layers = {violation.layer for violation in violations}
+        layers = {
+            violation.layer for violation in violations if violation.layer in LAYERS
+        }
         imports = {violation.imported for violation in violations}
 
         self.assertEqual(
@@ -108,7 +151,10 @@ class PackageBoundaryTests(unittest.TestCase):
                 "kosui_forge.adapters.doctor",
                 "kosui_forge.application.doctor",
                 "kosui_forge.experimental",
+                "kosui_forge.experimental.bad",
+                "kosui_forge.infrastructure",
                 "kosui_forge.infrastructure.cli",
+                "kosui_forge.infrastructure.doctor",
                 "kosui_forge.infrastructure.desktop",
                 "kosui_forge.presentation.cli",
                 "kosui_forge.presentation.cli.doctor",
@@ -157,8 +203,16 @@ class PackageBoundaryTests(unittest.TestCase):
                 "builtins.open",
             ): "direct filesystem API",
             (
+                Path("domain/dynamic.py"),
+                "kosui_forge.infrastructure.doctor",
+            ): "outward layer infrastructure",
+            (
                 Path("ports/credentials.py"),
                 "port field access_token",
+            ): "credential material",
+            (
+                Path("ports/credential_annotations.py"),
+                "port parameter value annotation AccessToken",
             ): "credential material",
         }
 
@@ -166,6 +220,47 @@ class PackageBoundaryTests(unittest.TestCase):
             with self.subTest(importer=edge[0], target=edge[1], rule=rule):
                 self.assertIn(edge, observed)
                 self.assertIn(rule, observed[edge])
+
+    def test_filesystem_fixture_rejects_each_reviewed_escape(self):
+        observed = {
+            (violation.path, violation.imported)
+            for violation in find_import_violations(FIXTURES / "forbidden")
+        }
+        expected = {
+            (Path("domain/filesystem.py"), imported)
+            for imported in {
+                "builtins.open",
+                "fileinput",
+                "glob",
+                "io.open",
+                "mmap",
+                "pathlib.Path.exists",
+                "pathlib.Path.open",
+                "pathlib.Path.read_bytes",
+                "pathlib.Path.read_text",
+                "pathlib.Path.write_text",
+            }
+        }
+
+        self.assertTrue(expected.issubset(observed))
+
+    def test_allowed_shadowing_does_not_look_like_forbidden_io_or_imports(self):
+        self.assertFalse(
+            any(
+                violation.path == Path("domain/dynamic.py")
+                for violation in find_import_violations(FIXTURES / "allowed")
+            )
+        )
+
+    def test_presentation_cannot_import_credential_integrations(self):
+        self.assertTrue(
+            any(
+                violation.path == Path("presentation/bad.py")
+                and violation.imported == "keyring"
+                and "credential integrations" in violation.reason
+                for violation in find_import_violations(FIXTURES / "forbidden")
+            )
+        )
 
     def test_ports_fixture_rejects_credential_values_but_allows_references(self):
         forbidden = find_import_violations(FIXTURES / "forbidden")
@@ -179,12 +274,16 @@ class PackageBoundaryTests(unittest.TestCase):
             credential_violations,
             {
                 "port class APIKey",
+                "port class AccessToken",
                 "port class ProviderCredentials",
                 "port field access_token",
+                "port field value annotation AccessToken",
                 "port field private_key",
                 "port field refresh_token",
                 "port method get_secret",
                 "port parameter password",
+                "port parameter value annotation AccessToken",
+                "port return authenticate annotation AccessToken",
             },
         )
         self.assertEqual(find_import_violations(FIXTURES / "allowed"), ())

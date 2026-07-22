@@ -1,3 +1,4 @@
 import importlib
 
-TWO = importlib.import_module("kosui_forge.domain.two")
+load_module = getattr(importlib, "import_module")
+TWO = load_module("kosui_forge.domain.two")

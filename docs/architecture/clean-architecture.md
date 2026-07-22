@@ -203,7 +203,7 @@ Every existing compatibility module has a target. A target can be split because 
 | Existing module | Current responsibility | Target boundary | Interim status |
 | --- | --- | --- | --- |
 | `repo_bootstrap.__init__` | compatibility package version | compatibility facade / packaging | retained while installed consumers and CLI exist |
-| `repo_bootstrap.cli` | argparse, plans/prompts, Doctor/create/mirror orchestration, output, exit codes | `presentation.cli` for parsing/rendering; application services for orchestration; `infrastructure.cli` for wiring | Doctor already calls the application service through `infrastructure.doctor`; renderer is still inline at baseline; create/mirror remain compatibility code |
+| `repo_bootstrap.cli` | argparse, plans/prompts, Doctor/create/mirror orchestration, output, exit codes | `presentation.cli` for parsing/rendering; application services for orchestration; `infrastructure.cli` for wiring | Doctor calls the application service through `infrastructure.cli` and uses the extracted typed-result renderer; `infrastructure.doctor` remains an import shim; create/mirror remain compatibility code |
 | `repo_bootstrap.config` | config value, validation, platform path/file reads and atomic writes | provider-neutral policy in `domain`; config ports in `ports`; filesystem implementation in `adapters.persistence`; orchestration in `application` | not migrated; no duplicate config model is allowed |
 | `repo_bootstrap.doctor` | embedding facade over preflight | application Doctor service plus a compatibility facade | retained for embedding compatibility until consumers move to `DoctorService` |
 | `repo_bootstrap.errors` | compatibility exception taxonomy | typed application errors/results and adapter-specific mapped failures | retained until every caller returns typed results without parsing prose |
@@ -248,9 +248,12 @@ For `repo_bootstrap.validation`, removal additionally requires a documented repl
 
 ## Mechanical enforcement
 
-The boundary implementation must add a standard-library AST checker under `tests/architecture/import_contract.py` and apply it to `src/kosui_forge` from `tests/architecture/test_import_contracts.py`. The checker must enforce:
+The executable architecture contract lives in `tests/architecture/import_contract.py`, and the unittest harness that exercises it lives in `tests/architecture/test_import_contracts.py`. The harness scans the real source tree under `src/kosui_forge` and the synthetic fixtures under `tests/architecture/fixtures`.
 
-- all six reviewed layers are real Python packages;
+The checker encodes the layer matrix with the `LAYERS` tuple and `_ALLOWED_LAYER_IMPORTS` mapping, then walks every Python file under the scanned root to collect import edges and cycle candidates. The documented layer rules are enforced as follows:
+
+- all six reviewed layers must exist as real Python packages under `src/kosui_forge`;
+- Python modules outside the six reviewed layer packages and the top-level public facade are rejected;
 - allowed layer edges only;
 - standard-library-only domain code;
 - no third-party, Qt, SDK, keyring, compatibility, process, or filesystem-infrastructure imports in inner layers;
@@ -258,21 +261,23 @@ The boundary implementation must add a standard-library AST checker under `tests
 - no adapter-to-presentation/infrastructure dependency;
 - no direct, relative, or literal dynamic import can bypass an allowed layer edge;
 - no inner-layer filesystem I/O hidden behind standard-library modules or APIs;
-- no credential-bearing public classes, fields, methods, or parameters in ports;
+- no credential-bearing public classes, fields, methods, parameters, annotations, or return types in ports;
 - no internal import cycles (strongly connected module components), including relative and literal dynamic imports;
 - explicit headless and future desktop composition-root decisions.
 
-The enforcement cannot rely on a denylist containing only `os`, `shutil`, `subprocess`, and `tempfile`: standard-library filesystem access through `open`, `io.open`, reviewed filesystem-reading or filesystem-writing `pathlib.Path` methods, `fileinput`, `glob`, or `mmap` is equally forbidden in inner layers. Pure path-value operations such as `Path.as_posix()`, `Path.name`, and lexical path composition remain allowed. Literal calls through direct or imported aliases of `importlib.import_module` and `__import__` are dependency edges and participate in both layer and cycle checks; relative `import_module` calls using a literal package or the module's `__package__` are resolved too. Non-literal targets passed to those reviewed import functions are reported as unprovable rather than guessed.
+The import checker does not stop at a denylist containing only `os`, `shutil`, `subprocess`, and `tempfile`: standard-library filesystem access through `open`, `io.open`, reviewed filesystem-reading or filesystem-writing `pathlib.Path` methods, `fileinput`, `glob`, or `mmap` is equally forbidden in inner layers. Pure path-value operations such as `Path.as_posix()`, `Path.name`, lexical path composition, and similar non-I/O path helpers remain allowed. Literal calls through direct aliases, imported aliases, or straightforward `getattr(..., "import_module")` selection of `importlib.import_module` and `__import__` are dependency edges and participate in both layer and cycle checks; relative import calls using a literal package or the module's `__package__` are resolved too. Non-literal targets passed to those reviewed import functions are reported as unprovable rather than guessed.
 
 The `allowed` fixtures prove that absolute and relative inward imports, safe standard-library imports, pure typed `Path` use, literal standard-library dynamic imports, third-party adapters, UI presentation libraries, Protocol/ABC capability ports, and composition-root wiring are accepted. The `forbidden` fixtures deliberately cover direct imports, from-imports, import aliases, Qt, GitHubKit, keyring, compatibility imports, process/filesystem I/O, direct and aliased file APIs, absolute and relative outward imports, literal and non-literal dynamic imports, package-facade shortcuts, and presentation bypasses. Cycle fixtures cover absolute, relative, and literal-dynamic cycles. Each category needs a relationship assertion proving that the intended violation was found; merely finding some violation in the same fixture is insufficient.
 
 Imports guarded by `typing.TYPE_CHECKING` follow the same matrix because they remain source dependencies even though Python does not execute them at runtime. The allowed fixtures include aliased, inward type-only imports, while a type-only outward port import is rejected. This prevents runtime-only assumptions from hiding coupling without treating a valid inward annotation as a violation.
 
-The port check inspects public type, field, method, function, and parameter names for credential-bearing shapes such as access/authentication tokens, passwords, secrets, authorization headers, authenticated URLs, API keys, and private keys. Explicit non-secret references, identifiers, availability/status metadata, credential capability protocols, and non-credential concepts such as cancellation or pagination tokens remain allowed. This is a deterministic guard against an accidental raw-secret contract, not a semantic proof: a generic name could still carry a secret and must be rejected in review.
+The port check inspects public type, field, method, function, and parameter names plus public field/parameter/return annotations and straightforward re-export aliases for credential-bearing shapes such as access/authentication tokens, passwords, secrets, authorization headers, authenticated URLs, API keys, and private keys. Explicit non-secret references, identifiers, availability/status metadata, credential capability protocols, and non-credential concepts such as cancellation or pagination tokens remain allowed. This is a deterministic guard against an accidental raw-secret contract, not a semantic proof: sufficiently indirect value flow can still hide a secret and must be rejected in review.
 
-The checker is intentionally static and does not claim to recover arbitrary runtime behavior. It tracks reviewed `Path` constructors, aliases, typed or assigned values, lexical path composition, and path-returning methods used before a filesystem call, but it does not perform general data-flow inference. It does not resolve `getattr`-selected import functions, user-defined import wrappers, import hooks, `exec`, or `eval`; those forms are prohibited in layer code and require explicit architecture review if a future use case proposes them. This boundary is recorded rather than treating an unknown runtime string as a proven dependency target.
+The checker is intentionally static and does not claim to recover arbitrary runtime behavior. It tracks reviewed `Path` constructors, aliases, typed or assigned values, lexical path composition, and path-returning methods used before a filesystem call, but it does not perform general data-flow inference. It records only literal dynamic imports it can resolve; unresolvable targets are treated as `(<dynamic>)` and remain part of the violation set. Straightforward `getattr`-selected `import_module` aliases are reviewed, while broader runtime tricks such as import hooks, `exec`, or `eval` remain outside the checker's proven scope and are not claimed as covered by these tests. Cycle detection is limited to the modules reachable under the scanned root and the import edges the checker can prove from source text.
 
 Architecture fixtures are source text, not executable tests. They must never contain credentials, network calls, filesystem mutation, or generated dependencies.
+
+Run the contract checks from the repository root with `python3 -m unittest -v tests.architecture.test_import_contracts`.
 
 ## Testing strategy
 

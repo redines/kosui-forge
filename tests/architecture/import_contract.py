@@ -30,6 +30,9 @@ _FORBIDDEN_INNER_STDLIB = frozenset(
     {"fileinput", "glob", "mmap", "os", "shutil", "subprocess", "tempfile"}
 )
 _FORBIDDEN_INNER_FILE_APIS = frozenset({"builtins.open", "io.open"})
+_FORBIDDEN_PRESENTATION_INTEGRATIONS = frozenset(
+    {"githubkit", "keyring", "pyforgejo", "repo_bootstrap"}
+)
 _PATH_IO_METHODS = frozenset(
     {
         "absolute",
@@ -209,11 +212,77 @@ def _function_arguments(
     return arguments
 
 
+def _attribute_name(node: ast.Attribute) -> str | None:
+    parts: list[str] = [node.attr]
+    value = node.value
+    while isinstance(value, ast.Attribute):
+        parts.append(value.attr)
+        value = value.value
+    if isinstance(value, ast.Name):
+        parts.append(value.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+def _annotation_mentions_credential_material(
+    annotation: ast.expr,
+    *,
+    type_aliases: dict[str, str],
+    sensitive_type_aliases: dict[str, str],
+) -> str | None:
+    def credential_alias(name: str) -> str | None:
+        if name in sensitive_type_aliases:
+            return sensitive_type_aliases[name]
+        resolved = type_aliases.get(name)
+        if resolved is None:
+            return name if _names_credential_material(name) else None
+        if _names_credential_material(resolved):
+            return resolved
+        return name if _names_credential_material(name) else None
+
+    for node in ast.walk(annotation):
+        if isinstance(node, ast.Name):
+            alias = credential_alias(node.id)
+            if alias is not None:
+                return alias
+        elif isinstance(node, ast.Attribute):
+            qualified = _attribute_name(node)
+            if qualified is None:
+                continue
+            alias = credential_alias(qualified)
+            if alias is not None:
+                return alias
+            terminal = qualified.rpartition(".")[2]
+            alias = credential_alias(terminal)
+            if alias is not None:
+                return alias
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            for identifier in re.findall(r"[A-Za-z_][A-Za-z0-9_\.]*", node.value):
+                alias = credential_alias(identifier)
+                if alias is not None:
+                    return alias
+    return None
+
+
 def _port_credential_references(tree: ast.Module) -> tuple[_ImportReference, ...]:
     """Return public port names that appear to carry reusable secret values."""
     references: list[_ImportReference] = []
+    seen: set[tuple[str, int]] = set()
     capability_aliases = {"ABC", "Protocol"}
+    type_aliases: dict[str, str] = {}
+    sensitive_type_aliases: dict[str, str] = {}
+
+    def add_reference(imported: str, line: int) -> None:
+        key = (imported, line)
+        if key not in seen:
+            seen.add(key)
+            references.append(_ImportReference(imported, line))
+
     for statement in tree.body:
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                local_name = alias.asname or alias.name.split(".", 1)[0]
+                type_aliases[local_name] = alias.name.rpartition(".")[2]
         if isinstance(statement, ast.ImportFrom) and statement.module in {
             "abc",
             "typing",
@@ -223,25 +292,75 @@ def _port_credential_references(tree: ast.Module) -> tuple[_ImportReference, ...
                 for alias in statement.names
                 if alias.name in {"ABC", "Protocol"}
             )
+        if isinstance(statement, ast.ImportFrom):
+            for alias in statement.names:
+                if alias.name == "*":
+                    continue
+                type_aliases[alias.asname or alias.name] = alias.name
+
+    for statement in tree.body:
+        if isinstance(statement, ast.ClassDef) and _names_credential_material(
+            statement.name
+        ):
+            sensitive_type_aliases[statement.name] = statement.name
+        elif isinstance(statement, ast.Assign):
+            value_name: str | None = None
+            if isinstance(statement.value, ast.Name):
+                value_name = statement.value.id
+            elif isinstance(statement.value, ast.Attribute):
+                value_name = _attribute_name(statement.value)
+            if value_name is None:
+                continue
+            annotation_name = _annotation_mentions_credential_material(
+                ast.Name(id=value_name, ctx=ast.Load()),
+                type_aliases=type_aliases,
+                sensitive_type_aliases=sensitive_type_aliases,
+            )
+            if annotation_name is None:
+                continue
+            for target in statement.targets:
+                if isinstance(target, ast.Name):
+                    sensitive_type_aliases[target.id] = annotation_name
 
     def inspect_field(name: str, line: int) -> None:
         if not name.startswith("_") and _names_credential_material(name):
-            references.append(_ImportReference(f"port field {name}", line))
+            add_reference(f"port field {name}", line)
+
+    def inspect_annotation(
+        name: str, annotation: ast.expr | None, line: int, *, kind: str
+    ) -> None:
+        if annotation is None:
+            return
+        annotation_name = _annotation_mentions_credential_material(
+            annotation,
+            type_aliases=type_aliases,
+            sensitive_type_aliases=sensitive_type_aliases,
+        )
+        if annotation_name is not None:
+            add_reference(f"port {kind} {name} annotation {annotation_name}", line)
 
     def inspect_function(
         node: ast.FunctionDef | ast.AsyncFunctionDef, *, kind: str
     ) -> None:
         if not node.name.startswith("_") and _names_credential_material(node.name):
-            references.append(_ImportReference(f"port {kind} {node.name}", node.lineno))
+            add_reference(f"port {kind} {node.name}", node.lineno)
         for argument in _function_arguments(node):
             if (
                 argument.arg not in {"self", "cls"}
                 and not argument.arg.startswith("_")
                 and _names_credential_material(argument.arg)
             ):
-                references.append(
-                    _ImportReference(f"port parameter {argument.arg}", argument.lineno)
+                add_reference(f"port parameter {argument.arg}", argument.lineno)
+            elif argument.arg not in {"self", "cls"} and not argument.arg.startswith(
+                "_"
+            ):
+                inspect_annotation(
+                    argument.arg,
+                    argument.annotation,
+                    argument.lineno,
+                    kind="parameter",
                 )
+        inspect_annotation(node.name, node.returns, node.lineno, kind="return")
 
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -249,6 +368,13 @@ def _port_credential_references(tree: ast.Module) -> tuple[_ImportReference, ...
             continue
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             inspect_field(node.target.id, node.lineno)
+            if not node.target.id.startswith("_"):
+                inspect_annotation(
+                    node.target.id,
+                    node.annotation,
+                    node.lineno,
+                    kind="field",
+                )
             continue
         if isinstance(node, ast.Assign):
             for target in node.targets:
@@ -265,7 +391,7 @@ def _port_credential_references(tree: ast.Module) -> tuple[_ImportReference, ...
         if not node.name.startswith("_") and _names_credential_material(
             node.name, capability=is_capability
         ):
-            references.append(_ImportReference(f"port class {node.name}", node.lineno))
+            add_reference(f"port class {node.name}", node.lineno)
         for member in node.body:
             if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 inspect_function(member, kind="method")
@@ -273,6 +399,13 @@ def _port_credential_references(tree: ast.Module) -> tuple[_ImportReference, ...
                 member.target, ast.Name
             ):
                 inspect_field(member.target.id, member.lineno)
+                if not member.target.id.startswith("_"):
+                    inspect_annotation(
+                        member.target.id,
+                        member.annotation,
+                        member.lineno,
+                        kind="field",
+                    )
             elif isinstance(member, ast.Assign):
                 for target in member.targets:
                     if isinstance(target, ast.Name):
@@ -291,23 +424,35 @@ class _ImportCollector(ast.NodeVisitor):
         self.shadowed_names: set[str] = set()
         self.imports: list[_ImportReference] = []
         self.cycle_candidates: list[str] = []
+        self.class_path_fields: set[str] = set()
+        self.function_depth = 0
 
     def _qualified_name(self, node: ast.expr) -> str | None:
         if isinstance(node, ast.Name):
             if node.id in self.path_values:
                 return "pathlib.Path"
             if node.id in self.shadowed_names:
-                return node.id
+                return None
+            if node.id == "getattr" and node.id not in self.aliases:
+                return "builtins.getattr"
             if node.id == "open" and node.id not in self.aliases:
                 return "builtins.open"
             if node.id == "__import__" and node.id not in self.aliases:
                 return "builtins.__import__"
             return self.aliases.get(node.id, node.id)
         if isinstance(node, ast.Attribute):
+            attribute_name = _attribute_name(node)
+            if attribute_name in self.path_values:
+                return "pathlib.Path"
             value = self._qualified_name(node.value)
             return f"{value}.{node.attr}" if value is not None else None
         if isinstance(node, ast.Call):
             called = self._qualified_name(node.func)
+            if called == "builtins.getattr":
+                receiver = self._qualified_name(node.args[0]) if node.args else None
+                attribute = self._literal_argument(node, 1, "name")
+                if receiver is not None and attribute is not None:
+                    return f"{receiver}.{attribute}"
             if called == "pathlib.Path" or (
                 called is not None
                 and called.startswith("pathlib.Path.")
@@ -318,6 +463,24 @@ class _ImportCollector(ast.NodeVisitor):
             if self._qualified_name(node.left) == "pathlib.Path":
                 return "pathlib.Path"
         return None
+
+    def _annotation_mentions_path(self, annotation: ast.expr) -> bool:
+        return any(
+            self._qualified_name(candidate) == "pathlib.Path"
+            for candidate in ast.walk(annotation)
+            if isinstance(candidate, (ast.Name, ast.Attribute))
+        )
+
+    def _shadow_target(self, target: ast.expr) -> None:
+        if isinstance(target, ast.Name):
+            self.aliases.pop(target.id, None)
+            self.path_values.discard(target.id)
+            self.shadowed_names.add(target.id)
+        elif isinstance(target, (ast.List, ast.Tuple)):
+            for element in target.elts:
+                self._shadow_target(element)
+        elif isinstance(target, ast.Starred):
+            self._shadow_target(target.value)
 
     @staticmethod
     def _literal_argument(node: ast.Call, position: int, keyword: str) -> str | None:
@@ -385,10 +548,13 @@ class _ImportCollector(ast.NodeVisitor):
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         imported = _resolve_import(node, module=self.module, is_package=self.is_package)
-        self.imports.append(_ImportReference(imported, node.lineno))
-        self.cycle_candidates.append(imported)
+        if node.module is not None or any(alias.name == "*" for alias in node.names):
+            self.imports.append(_ImportReference(imported, node.lineno))
+            self.cycle_candidates.append(imported)
         for alias in node.names:
             qualified = f"{imported}.{alias.name}" if imported else alias.name
+            if node.module is None and alias.name != "*":
+                self.imports.append(_ImportReference(qualified, node.lineno))
             self.cycle_candidates.append(qualified)
             self.aliases[alias.asname or alias.name] = qualified
 
@@ -402,6 +568,7 @@ class _ImportCollector(ast.NodeVisitor):
         aliases = self.aliases.copy()
         path_values = self.path_values.copy()
         shadowed_names = self.shadowed_names.copy()
+        function_depth = self.function_depth
         self.aliases.pop(node.name, None)
         self.path_values.discard(node.name)
         self.shadowed_names.add(node.name)
@@ -417,15 +584,22 @@ class _ImportCollector(ast.NodeVisitor):
         for argument in arguments:
             self.aliases.pop(argument.arg, None)
             self.shadowed_names.add(argument.arg)
-            if argument.annotation is not None and (
-                self._qualified_name(argument.annotation) == "pathlib.Path"
+            if argument.annotation is not None and self._annotation_mentions_path(
+                argument.annotation
             ):
                 self.path_values.add(argument.arg)
+        if function_depth == 0 and self.class_path_fields and arguments:
+            receiver = arguments[0].arg
+            self.path_values.update(
+                f"{receiver}.{field}" for field in self.class_path_fields
+            )
+        self.function_depth += 1
         for statement in node.body:
             self.visit(statement)
         self.aliases = aliases
         self.path_values = path_values
         self.shadowed_names = shadowed_names
+        self.function_depth = function_depth
         self.aliases.pop(node.name, None)
         self.path_values.discard(node.name)
         self.shadowed_names.add(node.name)
@@ -435,6 +609,95 @@ class _ImportCollector(ast.NodeVisitor):
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._visit_function(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+
+        aliases = self.aliases.copy()
+        path_values = self.path_values.copy()
+        shadowed_names = self.shadowed_names.copy()
+        class_path_fields = self.class_path_fields
+        function_depth = self.function_depth
+        self.aliases.pop(node.name, None)
+        self.path_values.discard(node.name)
+        self.shadowed_names.add(node.name)
+        self.class_path_fields = {
+            member.target.id
+            for member in node.body
+            if isinstance(member, ast.AnnAssign)
+            and isinstance(member.target, ast.Name)
+            and self._annotation_mentions_path(member.annotation)
+        }
+        self.function_depth = 0
+        for statement in node.body:
+            self.visit(statement)
+        self.aliases = aliases
+        self.path_values = path_values
+        self.shadowed_names = shadowed_names
+        self.class_path_fields = class_path_fields
+        self.function_depth = function_depth
+        self.aliases.pop(node.name, None)
+        self.path_values.discard(node.name)
+        self.shadowed_names.add(node.name)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        for default in (*node.args.defaults, *node.args.kw_defaults):
+            if default is not None:
+                self.visit(default)
+        aliases = self.aliases.copy()
+        path_values = self.path_values.copy()
+        shadowed_names = self.shadowed_names.copy()
+        arguments = (
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+        )
+        if node.args.vararg is not None:
+            arguments = (*arguments, node.args.vararg)
+        if node.args.kwarg is not None:
+            arguments = (*arguments, node.args.kwarg)
+        for argument in arguments:
+            self._shadow_target(ast.Name(id=argument.arg, ctx=ast.Store()))
+        self.visit(node.body)
+        self.aliases = aliases
+        self.path_values = path_values
+        self.shadowed_names = shadowed_names
+
+    def _visit_comprehension(
+        self,
+        generators: list[ast.comprehension],
+        values: tuple[ast.expr, ...],
+    ) -> None:
+        aliases = self.aliases.copy()
+        path_values = self.path_values.copy()
+        shadowed_names = self.shadowed_names.copy()
+        for generator in generators:
+            self.visit(generator.iter)
+            self._shadow_target(generator.target)
+            for condition in generator.ifs:
+                self.visit(condition)
+        for value in values:
+            self.visit(value)
+        self.aliases = aliases
+        self.path_values = path_values
+        self.shadowed_names = shadowed_names
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_SetComp(self, node: ast.SetComp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        self._visit_comprehension(node.generators, (node.elt,))
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:
+        self._visit_comprehension(node.generators, (node.key, node.value))
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
@@ -450,26 +713,43 @@ class _ImportCollector(ast.NodeVisitor):
                     "builtins.open",
                     "importlib.import_module",
                     "io.open",
-                }:
+                } or (
+                    assigned is not None
+                    and assigned.startswith("pathlib.Path.")
+                    and assigned.rpartition(".")[2] in _PATH_IO_METHODS
+                ):
                     self.aliases[target.id] = assigned
                     self.path_values.discard(target.id)
                     self.shadowed_names.discard(target.id)
                 else:
-                    self.path_values.discard(target.id)
-                    self.aliases.pop(target.id, None)
-                    self.shadowed_names.add(target.id)
+                    self._shadow_target(target)
+            elif isinstance(target, ast.Attribute):
+                target_name = _attribute_name(target)
+                if target_name is not None:
+                    if assigned == "pathlib.Path":
+                        self.path_values.add(target_name)
+                    else:
+                        self.path_values.discard(target_name)
+            else:
+                self._shadow_target(target)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         if node.value is not None:
             self.visit(node.value)
-        if isinstance(node.target, ast.Name) and (
-            self._qualified_name(node.annotation) == "pathlib.Path"
-            or (
-                node.value is not None
-                and self._qualified_name(node.value) == "pathlib.Path"
-            )
-        ):
+        is_path = self._annotation_mentions_path(node.annotation) or (
+            node.value is not None
+            and self._qualified_name(node.value) == "pathlib.Path"
+        )
+        if isinstance(node.target, ast.Name) and is_path:
             self.path_values.add(node.target.id)
+            self.aliases.pop(node.target.id, None)
+            self.shadowed_names.discard(node.target.id)
+        elif isinstance(node.target, ast.Attribute) and is_path:
+            target_name = _attribute_name(node.target)
+            if target_name is not None:
+                self.path_values.add(target_name)
+        else:
+            self._shadow_target(node.target)
 
     def visit_Call(self, node: ast.Call) -> None:
         called = self._qualified_name(node.func)
@@ -552,6 +832,8 @@ def _violation_reason(layer: str, imported: str) -> str | None:
             return f"presentation cannot bypass application through {target}"
         if imported == "repo_bootstrap" or imported.startswith("repo_bootstrap."):
             return "presentation cannot depend on the compatibility implementation"
+        if imported.split(".", 1)[0] in _FORBIDDEN_PRESENTATION_INTEGRATIONS:
+            return "presentation cannot depend on concrete provider or credential integrations"
     return None
 
 
@@ -560,7 +842,20 @@ def find_import_violations(root: Path) -> tuple[ImportViolation, ...]:
     violations: list[ImportViolation] = []
     for path in sorted(root.rglob("*.py")):
         relative = path.relative_to(root)
-        if not relative.parts or relative.parts[0] not in LAYERS:
+        if not relative.parts:
+            continue
+        if relative.parts[0] not in LAYERS:
+            if relative == Path("__init__.py"):
+                continue
+            violations.append(
+                ImportViolation(
+                    relative,
+                    1,
+                    relative.parts[0],
+                    _module_name(path, root),
+                    "source module is outside the reviewed Clean Architecture layer packages",
+                )
+            )
             continue
         layer = relative.parts[0]
         module = _module_name(path, root)

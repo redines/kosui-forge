@@ -9,3 +9,16 @@ JSON_MODULE = __import__("json")
 def call_domain_callback(open):
     """A caller-supplied callback named open is not the filesystem builtin."""
     return open("domain-value")
+
+
+def call_import_callback(importlib):
+    """A caller-owned object is not the imported importlib module."""
+    return importlib.import_module("kosui_forge.infrastructure.cli")
+
+
+def call_lambda(callback):
+    return (lambda open: open("domain-value"))(callback)
+
+
+def call_comprehension(callbacks):
+    return [open("domain-value") for open in callbacks]

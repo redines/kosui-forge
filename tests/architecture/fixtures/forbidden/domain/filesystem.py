@@ -25,3 +25,19 @@ def read_files() -> tuple[object, ...]:
 
 def inspect_typed_path(path: BoundaryPath) -> bool:
     return path.exists()
+
+
+def inspect_optional_path(path: BoundaryPath | None) -> bool:
+    return path is not None and path.exists()
+
+
+class RepositoryReader:
+    path: BoundaryPath
+
+    def read(self) -> str:
+        return self.path.read_text()
+
+
+def call_bound_reader() -> str:
+    read = BoundaryPath("repository.txt").read_text
+    return read()
