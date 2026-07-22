@@ -151,7 +151,7 @@ This inventory proves that “one file” is not equivalent to “portable to ev
 
 ## Proposed application boundary
 
-Kosui Forge introduces UI-neutral contracts and use cases under `src/kosui_forge/application`, narrow protocols under `src/kosui_forge/ports`, the compatibility preflight bridge under `src/kosui_forge/adapters`, and concrete wiring under `src/kosui_forge/infrastructure`. The compatibility CLI and future GUI depend inward on the same tested policy core:
+Kosui Forge introduces UI-neutral contracts and use cases under `src/kosui_forge/application`, narrow protocols under `src/kosui_forge/ports`, concrete adapters under `src/kosui_forge/adapters`, presentation adapters under `src/kosui_forge/presentation`, and composition roots under `src/kosui_forge/infrastructure`. The approved dependency rule and migration map are defined in [`docs/architecture/clean-architecture.md`](clean-architecture.md). The compatibility CLI and future GUI depend inward on the same tested policy core:
 
 ```text
 PySide6 widgets       argparse CLI       future reviewed launcher
@@ -177,7 +177,7 @@ The foundation implements only contracts consumed by the real Doctor adapter, av
 
 Create and mirror request shapes remain deferred until a real adapter consumes them. Mutating services must later check cancellation only at journaled safe points, never while a remote mutation is ambiguous.
 
-The application service owns use-case orchestration and result construction through narrow ports. Concrete configuration, SDK, and preflight calls remain in adapters/infrastructure during the incremental migration; tested safety policy remains in the compatibility core until a vertical slice moves it inward. The GUI owns widgets, navigation, clipboard/browser integration, and presentation only. The CLI remains responsible for terminal parsing and text rendering only. Shared policy must never be reimplemented in signal handlers.
+The application use case owns orchestration and result construction through narrow ports. Concrete configuration, SDK, and preflight calls remain in adapters/infrastructure during the incremental migration; tested safety policy remains in the compatibility core until a vertical slice moves it inward. The presentation adapter owns widgets, navigation, clipboard/browser integration, and presentation only. The CLI remains responsible for terminal parsing and text rendering only. Shared policy must never be reimplemented in signal handlers.
 
 ### Execution and cancellation model
 

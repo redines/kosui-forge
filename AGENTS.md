@@ -58,6 +58,18 @@ The exact number of files may evolve, but these dependency directions are mandat
 
 Prefer immutable dataclasses, enums, and narrow protocols at boundaries. Return structured results rather than prose that another layer must parse.
 
+### Shared architecture terminology
+
+- **Domain** means provider-neutral entities, value objects, and policy with no I/O.
+- **Application service** or **use case** means orchestration for one user goal through typed requests, ports, events, and results.
+- **Port** means the smallest use-case-driven interface required from an outer capability.
+- **Adapter** means a concrete translation to an SDK, subprocess, filesystem, keyring, or temporary compatibility implementation.
+- **Presentation adapter** means CLI or Qt code that submits application requests and renders typed results without owning policy.
+- **Composition root** means the explicit infrastructure module that constructs and injects concrete adapters; it is not a service locator or workflow.
+- **Compatibility shim** means a temporary tested bridge with documented removal criteria.
+
+The accepted dependency matrix, current module map, composition roots, and migration mapping are documented in `docs/architecture/clean-architecture.md` and enforced by `tests/architecture/test_import_contracts.py`.
+
 ## Incremental migration
 
 The existing `repo_bootstrap` package is a tested compatibility implementation. Refactor it by vertical slice; do not perform a big-bang rewrite.
