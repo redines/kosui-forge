@@ -21,7 +21,7 @@ The public Forgejo repository is the source of truth. A GitHub push mirror may b
 
 Kosui Forge is a fully AI-generated project under human direction. Do not remove, weaken, hide, or relocate the prominent README disclosure without explicit maintainer approval.
 
-AI agents generate source code, tests, documentation, and build automation. Humans provide requirements, product decisions, review, and merge approval. Never auto-merge a pull request or imply that AI-generated output has received human review when it has not.
+AI agents generate source code, tests, documentation, and build automation. Humans provide requirements, product decisions, and repository integration policy. The maintainer has explicitly authorized verified direct commits to `main` for Kosui Forge and automated integration of already-open correction pull requests. Never imply that AI-generated output received human review when it did not.
 
 ## Architecture: dependency rule
 
@@ -164,18 +164,16 @@ Also verify:
 
 Authenticated or mutating E2E tests require an explicit disposable-environment gate. Never create or delete real repositories merely to make a routine unit test pass.
 
-## Git and review workflow
+## Git and integration workflow
 
-- Work on an isolated task branch/worktree based on current `origin/main`.
-- Keep each task and pull request narrowly scoped and independently reviewable.
+- New Kosui Forge work integrates directly into `main`; do not create new feature branches or pull requests.
+- Use the canonical `main` checkout with one direct writer at a time. Fetch and fast-forward to current `origin/main` immediately before the final verification/commit boundary.
+- Existing task worktrees and already-open pull requests may be preserved long enough to finish corrections safely. After canonical verification, integrate those commits into current `main` and close or merge the existing pull request rather than opening a replacement.
 - Use Conventional Commits 1.0.0 and SemVer 2.0.0.
-- Run focused checks during development and the required final matrix before handoff.
-- Push every meaningful completed checkpoint.
-- Open a Forgejo pull request and record commit, tests, risks, and exact next step in the Kanban handoff.
-- Leave manual-review cards unassigned in Review.
-- Never merge automatically.
-- Do not force-push a reviewed branch unless resolving an explicit review requirement and preserving the existing PR is intended.
-- After merge, verify the feature commit is reachable from `origin/main` before removing branches or worktrees.
+- Run focused checks during development and the required final matrix against the exact staged snapshot before committing.
+- Require independent automated review for security-sensitive, credential, Git, provider, CI, packaging, and release changes. Fix review findings before integration.
+- Push each verified Conventional Commit directly to `origin/main`; never force-push or rewrite reviewed/published history.
+- Record commit, tests, risks, and exact next step in the Kanban handoff, then verify the pushed commit is reachable from `origin/main`.
 
 ## Documentation expectations
 
