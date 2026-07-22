@@ -168,14 +168,9 @@ Packaging dispatches `repo-bootstrap` directly to `repo_bootstrap.cli:main`. At 
 
 `repo_bootstrap.cli` remains the executable compatibility presentation. During migration it may import the infrastructure composition root, typed application contracts, and presentation renderers. It must not instantiate an alternative policy implementation. When every compatibility command delegates to application services, a later reviewed entry-point migration may make `kosui_forge.infrastructure.cli` the installed callable; that packaging change is not part of this decision's first slice.
 
-### Future desktop application
+### Desktop application
 
-`kosui_forge.infrastructure.desktop` is the reserved composition-root name for the future PySide6 application. The module does not exist yet because there is no production desktop presentation to compose. Creating a placeholder Qt framework or speculative desktop ports would violate this decision. The module is added with the first real desktop vertical slice and will:
-
-1. construct concrete credential, persistence, provider, Git, and compatibility adapters required by that slice;
-2. inject them into the same application services used by headless interfaces;
-3. construct the desktop presenter/view-model graph;
-4. return or start the application shell without embedding business policy.
+`kosui_forge.infrastructure.desktop` is the PySide6 composition root. Its first real vertical slice constructs the compatibility-backed `DoctorService`, injects that same application service into the desktop worker and presentation model, and builds the application shell without embedding business policy. Later slices add only the concrete credential, persistence, provider, and Git adapters required by their reviewed use cases; the root must not speculate ahead of those slices.
 
 Qt imports belong in `presentation.desktop` and platform-specific desktop composition code, never in domain, application, or ports. Qt workers invoke application services off the GUI thread and deliver immutable events back to the GUI thread.
 
@@ -194,7 +189,7 @@ Every remaining use case follows this order:
 7. **Prove parity** with unit, contract, real temporary-filesystem/subprocess, and compatibility CLI tests.
 8. **Remove the old path** only after no callers use it and the shim's removal criteria are satisfied.
 
-The planned order is Doctor (in progress), repository creation, mirror inspection/provisioning, configuration, journals/recovery, credential sources, catalog/persistence, and then desktop-only workflows. This order does not pre-authorize public creation, destructive operations, or new credential flows.
+The planned order is Doctor (available in the compatibility CLI and interpreted desktop), repository creation, mirror inspection/provisioning, configuration, journals/recovery, credential sources, catalog/persistence, and then desktop-only workflows. This order does not pre-authorize public creation, destructive operations, or new credential flows.
 
 ## `repo_bootstrap` migration map
 
