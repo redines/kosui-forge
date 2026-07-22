@@ -4,9 +4,9 @@ This document is an engineering plan, not legal advice or a completed legal revi
 
 ## Current source dependencies
 
-The Python distribution currently declares GitHubKit (including its selected schema packages) and pyforgejo. Their resolved transitive dependencies must be inventoried from the built wheel and final desktop artifact rather than inferred only from a development environment. System Git, GitHub CLI, and OpenSSH are prerequisites and are not distributed by this project.
+The Python distribution currently declares GitHubKit (including its selected schema packages), PySide6, and pyforgejo. Their resolved transitive dependencies must be inventoried from the built wheel and any future native desktop artifact rather than inferred only from a development environment. System Git, GitHub CLI, and OpenSSH are prerequisites and are not distributed by this project.
 
-The imported [cross-platform architecture evidence](architecture/cross-platform-gui-plan.md#licensing-and-redistribution-review) records the source spike's observed licenses and the additional review required before introducing PySide6, Qt, Nuitka, keyring backends, or installer tooling. Those observations are planning inputs, not legal conclusions and not a statement that those components are currently shipped.
+The imported [cross-platform architecture evidence](architecture/cross-platform-gui-plan.md#licensing-and-redistribution-review) records the source spike's observed licenses and the additional review required before bundling Qt in a native artifact or introducing Nuitka, keyring backends, or installer tooling. Those observations are planning inputs, not legal conclusions and do not make the interpreted desktop slice a release artifact.
 
 ## Required release evidence
 
