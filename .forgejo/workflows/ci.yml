@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      run_sonar:
+        description: Run SonarQube analysis and issue synchronization on main.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  SHARED_WORKFLOWS_REF: ddafef6593bffc454668cfcb0035faf886fccd3f
+  SONAR_PROJECT_KEY: kosui-forge
+  ARTIFACT_RETENTION_DAYS: "14"
+
+jobs:
+  verify:
+    name: Verify, build, and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: https://code.forgejo.org/actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: https://code.forgejo.org/actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Run repository verification
+        run: ./scripts/ci/verify.sh
+
+      - name: Check out shared SonarQube actions
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_sonar)) }}
+        uses: https://code.forgejo.org/actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: pontus-local/kosui-workflows
+          ref: ${{ env.SHARED_WORKFLOWS_REF }}
+          path: .kosui-workflows
+          persist-credentials: false
+
+      - name: Validate SonarQube configuration
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_sonar)) }}
+        uses: ./.kosui-workflows/actions/validate-sonar-config
+        with:
+          sonar-host-url: ${{ secrets.SONAR_HOST_URL }}
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Run SonarQube analysis
+        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_sonar)) }}
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ env.SONAR_PROJECT_KEY }}
+          SONAR_PROJECT_VERSION: ${{ github.sha }}
+        run: ./scripts/ci/run-sonar.sh
+
+      - name: Upload CI artifacts
+        if: ${{ always() }}
+        uses: https://code.forgejo.org/actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ github.event_name }}-${{ github.run_number }}-${{ github.sha }}-ci-artifacts
+          path: |
+            coverage.xml
+            test-results/
+            dist/
+            ci-artifacts/
+          if-no-files-found: error
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+
+  sync_sonar_issues:
+    name: Sync SonarQube issues
+    needs: verify
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_sonar)) }}
+    permissions:
+      contents: read
+      issues: write
+    uses: pontus-local/kosui-workflows/.forgejo/workflows/sonar-issues.yml@ddafef6593bffc454668cfcb0035faf886fccd3f
+    with:
+      runner: ubuntu-latest
+      project_key: kosui-forge
+      source_ref: ddafef6593bffc454668cfcb0035faf886fccd3f
+      allow_unpinned_source: false
+      timeout_minutes: 15
+    secrets:
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
